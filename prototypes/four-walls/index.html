@@ -1,0 +1,986 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Kagami Walls</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=Zen+Kaku+Gothic+New:wght@400;700&display=swap">
+<style>
+  :root {
+    /* Layout: full-bleed canvas with a mirror box (four judgement walls) in the free area; HTML panels float over it for title and results */
+    --ink: #0b0a16;
+    --ink-2: #1b1830;
+    --panel: rgba(11, 10, 22, 0.84);
+    --paper: #f1eef8;
+    --muted: #a39fbd;
+    --line: rgba(241, 238, 248, 0.16);
+    --w0: #4cc9ff; /* 空   top    ↑ W */
+    --w1: #ffa24c; /* 橙   right  → D */
+    --w2: #7be07b; /* 若草 bottom ↓ S */
+    --w3: #ff6fa8; /* 桃   left   ← A */
+    --font-display: "Dela Gothic One", "Zen Kaku Gothic New", "Hiragino Sans", sans-serif;
+    --font-body: "Zen Kaku Gothic New", "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+    color-scheme: dark;
+  }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; margin: 0; overflow: hidden; background: var(--ink); color: var(--paper); font-family: var(--font-body); }
+  canvas#stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+
+  .panel-wrap {
+    position: fixed; inset: 0; display: flex; align-items: flex-end; justify-content: flex-start;
+    padding-block: max(20px, env(safe-area-inset-bottom, 0px)) max(20px, env(safe-area-inset-bottom, 0px));
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    pointer-events: none;
+  }
+  .panel {
+    pointer-events: auto; width: min(440px, 100%); box-sizing: border-box;
+    background: var(--panel); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--line); border-radius: 14px; padding: 22px 22px 18px;
+    display: grid; gap: 16px;
+  }
+  .brand { display: grid; gap: 4px; }
+  h1 { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: 2.7rem; line-height: 1; letter-spacing: 0.06em; }
+  h1 span:nth-child(4n+1) { color: var(--w0); }
+  h1 span:nth-child(4n+2) { color: var(--w1); }
+  h1 span:nth-child(4n+3) { color: var(--w2); }
+  h1 span:nth-child(4n+4) { color: var(--w3); }
+  .sub { margin: 0; color: var(--muted); font-size: 0.86rem; letter-spacing: 0.08em; }
+  .lede { margin: 0; line-height: 1.75; font-size: 0.95rem; }
+  .lede strong { color: var(--w1); font-weight: 700; }
+
+  .keys { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .keys li { display: grid; justify-items: center; gap: 2px; padding: 7px 0 6px; border-radius: 10px; border: 1.5px solid var(--c); background: color-mix(in srgb, var(--c) 14%, transparent); }
+  .keys b { font-family: var(--font-display); font-weight: 400; font-size: 1.15rem; color: var(--paper); }
+  .keys span { font-size: 0.72rem; color: var(--c); font-weight: 700; letter-spacing: 0.06em; }
+
+  .settings { display: grid; gap: 10px; }
+  .row { display: grid; grid-template-columns: 8.5em 1fr 4.2em; align-items: center; gap: 10px; font-size: 0.86rem; }
+  .row output { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .row small { grid-column: 2 / 4; color: var(--muted); font-size: 0.74rem; margin-top: -6px; }
+  input[type=range] { width: 100%; accent-color: var(--w0); }
+  .check { display: flex; align-items: center; gap: 8px; font-size: 0.86rem; cursor: pointer; }
+  .check input { accent-color: var(--w0); width: 16px; height: 16px; }
+
+  .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+  button {
+    font: inherit; font-weight: 700; cursor: pointer; border-radius: 999px; padding: 10px 22px;
+    border: 1.5px solid var(--line); background: transparent; color: var(--paper);
+  }
+  button.primary { background: var(--paper); color: var(--ink); border-color: var(--paper); }
+  button:hover { border-color: var(--paper); }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--w1); outline-offset: 2px; }
+  .hint { color: var(--muted); font-size: 0.76rem; }
+  .meta { margin: 0; color: var(--muted); font-size: 0.74rem; border-top: 1px solid var(--line); padding-top: 12px; }
+
+  .eyebrow { margin: 0; font-size: 0.74rem; letter-spacing: 0.24em; color: var(--muted); }
+  .result-head { display: flex; align-items: baseline; gap: 16px; }
+  .rank { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: 4rem; line-height: 1; color: var(--w1); }
+  .score { font-family: var(--font-display); font-size: 2rem; font-variant-numeric: tabular-nums; }
+  .stats { margin: 0; display: grid; grid-template-columns: 1fr auto; gap: 6px 16px; font-size: 0.9rem; }
+  .stats dt { color: var(--muted); letter-spacing: 0.08em; }
+  .stats dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
+
+  @media (min-width: 900px) {
+    .panel-wrap { align-items: center; padding-left: max(48px, env(safe-area-inset-left, 0px)); }
+  }
+  @media (max-height: 700px) and (max-width: 899px) {
+    .lede, .meta { display: none; }
+  }
+</style>
+</head>
+<body>
+<canvas id="stage" aria-label="プレイ画面"></canvas>
+
+<div class="panel-wrap" id="titleWrap">
+  <section class="panel" aria-labelledby="gameTitle">
+    <div class="brand">
+      <h1 id="gameTitle" aria-label="KAGAMI"><span>K</span><span>A</span><span>G</span><span>A</span><span>M</span><span>I</span></h1>
+      <p class="sub">鏡の間 ・ 四辺反射のプロトタイプ</p>
+    </div>
+    <p class="lede">四方の壁がすべて判定ラインです。光の玉が跳ね回り、<strong>壁に当たる瞬間</strong>にその壁のキーを押します。玉の色は、次に当たる壁の色です。</p>
+    <ul class="keys" aria-label="キーと壁の対応">
+      <li style="--c: var(--w0)"><b>↑ W</b><span>上の壁</span></li>
+      <li style="--c: var(--w3)"><b>← A</b><span>左の壁</span></li>
+      <li style="--c: var(--w2)"><b>↓ S</b><span>下の壁</span></li>
+      <li style="--c: var(--w1)"><b>→ D</b><span>右の壁</span></li>
+    </ul>
+    <div class="settings">
+      <div class="row">
+        <label for="speed">ハイスピード</label>
+        <input type="range" id="speed" min="0.6" max="2.4" step="0.1" value="1">
+        <output id="speedOut" for="speed">1.0</output>
+      </div>
+      <div class="row">
+        <label for="offset">判定オフセット</label>
+        <input type="range" id="offset" min="-200" max="200" step="5" value="0">
+        <output id="offsetOut" for="offset">0 ms</output>
+        <small>音が遅れて聞こえるときは ＋ 側へ</small>
+      </div>
+      <label class="check"><input type="checkbox" id="auto"> オートプレイで見る</label>
+    </div>
+    <div class="actions">
+      <button class="primary" id="startBtn" type="button">演奏する</button>
+      <span class="hint">Space で開始 ・ プレイ中は Esc で中断 ・ 矢印と WASD は同じ ・ スマホは壁の側をタップ</span>
+    </div>
+    <p class="meta">BPM 124 ・ 44小節 ・ 約1分25秒 ・ 曲はブラウザ内でリアルタイム合成</p>
+  </section>
+</div>
+
+<div class="panel-wrap" id="resultWrap" hidden>
+  <section class="panel" aria-labelledby="resRank">
+    <p class="eyebrow">RESULT</p>
+    <div class="result-head">
+      <h2 class="rank" id="resRank">S</h2>
+      <div class="score" id="resScore">0</div>
+    </div>
+    <dl class="stats">
+      <dt>PERFECT</dt><dd id="resPerfect">0</dd>
+      <dt>GREAT</dt><dd id="resGreat">0</dd>
+      <dt>GOOD</dt><dd id="resGood">0</dd>
+      <dt>MISS</dt><dd id="resMiss">0</dd>
+      <dt>MAX COMBO</dt><dd id="resCombo">0</dd>
+    </dl>
+    <div class="actions">
+      <button class="primary" id="againBtn" type="button">もう一度</button>
+      <button id="backBtn" type="button">タイトルへ</button>
+    </div>
+  </section>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  // ===== Song =====
+  const BPM = 124;
+  const SPB = 60 / BPM;
+  const LEAD_IN = 2.2;
+
+  const css = getComputedStyle(document.documentElement);
+  const hex = (v) => {
+    const h = css.getPropertyValue(v).trim().replace('#', '');
+    return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
+  };
+  const INK = hex('--ink'), INK2 = hex('--ink-2'), PAPER = hex('--paper'), MUTED = hex('--muted');
+  // Walls in clockwise order: 0 top, 1 right, 2 bottom, 3 left.
+  const WALLS = [
+    { codes: ['ArrowUp', 'KeyW'], key: 'W', rgb: hex('--w0') },
+    { codes: ['ArrowRight', 'KeyD'], key: 'D', rgb: hex('--w1') },
+    { codes: ['ArrowDown', 'KeyS'], key: 'S', rgb: hex('--w2') },
+    { codes: ['ArrowLeft', 'KeyA'], key: 'A', rgb: hex('--w3') },
+  ];
+  const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+
+  const SECTIONS = [
+    { bar: 0, name: 'INTRO', hue: 0 },
+    { bar: 4, name: 'VERSE', hue: 2 },
+    { bar: 12, name: 'BUILD', hue: 1 },
+    { bar: 20, name: 'CHORUS', hue: 3 },
+    { bar: 28, name: 'BREAK', hue: 0 },
+    { bar: 32, name: 'CHORUS II', hue: 3 },
+    { bar: 40, name: 'OUTRO', hue: 2 },
+  ];
+  const BARS_TOTAL = 44;
+  const SONG_END = BARS_TOTAL * 4 * SPB + 0.8;
+
+  // Chart: each track is one or more light balls. Steps are 8th notes, '|' marks bars.
+  // U R D L = the ball strikes that wall. Lowercase starts a hold: the ball slides along the
+  // wall while '-' follows. Hits in a track belong to the same ball until a gap of over 3 beats.
+  const TRACKS = [
+    { at: 0, seq: 'U.R.D.L.|U.R.D.L.|U...D...|R...L...' },
+    { at: 4, seq: 'L...R...|L...R...|U...D...|U...D...|L...U...|R...D...|L...R...|u-------' },
+    { at: 4, seq: '..U...D.|..U...D.|..L...R.|..L...R.|..D...L.|..U...R.|..D...U.' },
+    { at: 12, seq: 'U.D.U.D.|L.R.L.R.|U.R.D.L.|U.R.D.L.|U...D...|L...R...|U.L.D.R.|U.......' },
+    { at: 12, seq: '.L...R..|.U...D..|.L...R..|.U...D..|.L.R.L.R|.U.D.U.D|.L.U.R.D' },
+    { at: 19, seq: '..L.R.D.' },
+    { at: 20, seq: 'U.R.D.L.|U.R.D.L.|U.D.U.D.|l---..R.|U.R.D.L.|U.R.D.L.|U.D.U.D.|L.R.L.R.' },
+    { at: 20, seq: '...D...L|...U...R|...L...R|....D.U.|...D...L|...U...R|...L...R|...U...D' },
+    { at: 28, seq: 'u---..d-|--..l---|..r---..|U...D...' },
+    { at: 32, seq: 'U.R.D.L.|U.D.L.R.|U.R.D.L.|r---..L.|U.L.D.R.|U.D.L.R.|U.R.D.L.|U.D.U.D.' },
+    { at: 32, seq: '...L...D|...R...U|...L...D|....U.D.|...R...L|...D...U|...L...R|...L...R' },
+    { at: 40, seq: 'U...D...|L...R...|u-------' },
+    { at: 42, seq: 'd-------' },
+  ];
+
+  // Em - C - G - D. Lead pitch per wall: top high, bottom low.
+  const CHORDS = [
+    { pad: [52, 55, 59], bass: 40, lead: [76, 71, 64, 67] },
+    { pad: [52, 55, 60], bass: 36, lead: [76, 72, 64, 67] },
+    { pad: [55, 59, 62], bass: 43, lead: [74, 71, 67, 62] },
+    { pad: [54, 57, 62], bass: 38, lead: [74, 69, 66, 62] },
+  ];
+
+  // ----- Build balls and notes -----
+  function mulberry32(a) {
+    return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  }
+  const rnd = mulberry32(20261027);
+  // Point on a wall in table units (0..1 both ways).
+  const wallPoint = (w, u) => (w === 0 ? [u, 0] : w === 1 ? [1, u] : w === 2 ? [u, 1] : [0, u]);
+
+  const BALLS = [], CHART = [];
+  for (const tr of TRACKS) {
+    const seq = tr.seq.replace(/[|\s]/g, '');
+    const hits = [];
+    for (let i = 0; i < seq.length; i++) {
+      const c = seq[i];
+      if (c === '.' || c === '-') continue;
+      const w = 'URDL'.indexOf(c.toUpperCase());
+      if (w < 0) { console.warn(`unknown step "${c}"`); continue; }
+      let len = 0;
+      if (c !== c.toUpperCase()) { let j = i + 1; while (j < seq.length && seq[j] === '-') j++; len = j - i; }
+      hits.push({ beat: tr.at * 4 + i / 2, wall: w, beats: len / 2 });
+    }
+    let ball = null;
+    for (const h of hits) {
+      const prev = ball && ball.hits[ball.hits.length - 1];
+      const gap = prev ? h.beat - (prev.beat + prev.beats) : Infinity;
+      if (gap > 3) { ball = { hits: [], frames: [] }; BALLS.push(ball); }
+      else if (prev.wall === h.wall) console.warn(`beat ${h.beat}: a ball cannot hit the same wall twice in a row`);
+      else if ((prev.wall + 2) % 4 === h.wall ? gap < 1 : gap < 0.5) console.warn(`beat ${h.beat}: too fast to cross from wall ${prev.wall}`);
+      ball.hits.push(h);
+    }
+  }
+  for (const ball of BALLS) {
+    ball.spawn = [0.5 + (rnd() - 0.5) * 0.3, 0.5 + (rnd() - 0.5) * 0.3];
+    for (const h of ball.hits) {
+      const u0 = 0.18 + rnd() * 0.64;
+      const t = h.beat * SPB, dur = h.beats * SPB;
+      const note = { beat: h.beat, t, wall: h.wall, dur, ball };
+      CHART.push(note);
+      ball.frames.push({ t, p: wallPoint(h.wall, u0), note });
+      if (dur > 0) {
+        const u1 = u0 < 0.5 ? Math.min(0.85, u0 + 0.3) : Math.max(0.15, u0 - 0.3);
+        ball.frames.push({ t: t + dur, p: wallPoint(h.wall, u1), tail: note });
+      }
+    }
+    ball.first = ball.frames[0].t;
+    ball.last = ball.frames[ball.frames.length - 1].t;
+  }
+  CHART.sort((a, b) => a.t - b.t || a.wall - b.wall);
+  const TOTAL_JUDGES = CHART.reduce((n, c) => n + (c.dur > 0 ? 2 : 1), 0);
+
+  // ===== Settings =====
+  const settings = { speed: 1, offset: 0, auto: false };
+  try { Object.assign(settings, JSON.parse(localStorage.getItem('kagami.settings') || '{}')); } catch (e) { /* storage unavailable */ }
+  const saveSettings = () => { try { localStorage.setItem('kagami.settings', JSON.stringify(settings)); } catch (e) { /* ignore */ } };
+  let VIEW = 1.4 / settings.speed; // how long a ball is visible before its first strike, and how early targets show
+
+  // Ball position (table units) at time t, or null when it is not on screen.
+  function ballAt(ball, t) {
+    const F = ball.frames;
+    if (t < ball.first) {
+      const u = 1 - (ball.first - t) / VIEW;
+      if (u < 0) return null;
+      return [ball.spawn[0] + (F[0].p[0] - ball.spawn[0]) * u, ball.spawn[1] + (F[0].p[1] - ball.spawn[1]) * u];
+    }
+    if (t >= ball.last) return F[F.length - 1].p;
+    let i = 0;
+    while (i < F.length - 2 && F[i + 1].t <= t) i++;
+    const a = F[i], b = F[i + 1], k = (t - a.t) / (b.t - a.t);
+    return [a.p[0] + (b.p[0] - a.p[0]) * k, a.p[1] + (b.p[1] - a.p[1]) * k];
+  }
+  // Index of the first frame that is a strike (not a hold tail) still ahead of t.
+  function nextStrike(ball, t) {
+    for (let i = 0; i < ball.frames.length; i++) if (ball.frames[i].note && ball.frames[i].t > t) return i;
+    return -1;
+  }
+
+  // ===== Canvas & layout =====
+  const $ = (s) => document.querySelector(s);
+  const cv = $('#stage');
+  const g = cv.getContext('2d');
+  let W = 0, H = 0, DPR = 1;
+  const R = { x: 0, y: 0, w: 1, h: 1 }, RG = { x: 0, y: 0, w: 1, h: 1 };
+
+  function resize() {
+    DPR = Math.min(2, window.devicePixelRatio || 1);
+    W = window.innerWidth; H = window.innerHeight;
+    cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+    g.setTransform(DPR, 0, 0, DPR, 0, 0);
+    rectGoal();
+    Object.assign(R, RG);
+  }
+  function rectGoal() {
+    const top = Math.max(78, H * 0.1), bottom = Math.max(62, H * 0.08);
+    let x0 = 50, x1 = W - 50;
+    if (W >= 900 && S.mode !== 'play') x0 = Math.max(W * 0.42, 560);
+    const aw = x1 - x0, ah = H - top - bottom;
+    const w = Math.min(aw, ah * 1.6), h = Math.min(ah, aw * 2);
+    RG.w = w; RG.h = h; RG.x = x0 + (aw - w) / 2; RG.y = top + (ah - h) / 2;
+  }
+  const px = (p) => [R.x + p[0] * R.w, R.y + p[1] * R.h];
+  const ballR = () => Math.max(7, Math.min(R.w, R.h) * 0.024);
+
+  // ===== Game state =====
+  const S = {
+    mode: 'title', notes: [], cursor: 0, auto: true, attract: true,
+    combo: 0, maxCombo: 0, counts: { perfect: 0, great: 0, good: 0, miss: 0 }, weight: 0,
+    pressed: [false, false, false, false], autoHold: [0, 0, 0, 0], flash: [0, 0, 0, 0],
+    popup: null, attractT0: 0,
+  };
+  const WIN = { perfect: 0.045, great: 0.09, good: 0.135 };
+  const WEIGHT = { perfect: 1, great: 0.7, good: 0.4, miss: 0 };
+  const GRADE_COLOR = { perfect: PAPER, great: WALLS[1].rgb, good: WALLS[0].rgb, miss: MUTED };
+  const state = new Map(); // chart note -> per-run judgement
+
+  function newRun(auto, attract) {
+    state.clear();
+    S.notes = CHART.map((c) => { const n = { ...c, src: c, end: c.t + c.dur, head: null, tail: null, holding: false }; state.set(c, n); return n; });
+    S.cursor = 0; S.auto = auto; S.attract = attract;
+    S.combo = 0; S.maxCombo = 0; S.weight = 0;
+    S.counts = { perfect: 0, great: 0, good: 0, miss: 0 };
+    S.pressed.fill(false); S.autoHold.fill(0); S.flash.fill(0);
+    S.popup = null; particles.length = 0; rings.length = 0;
+  }
+
+  const gradeOf = (adt) => (adt <= WIN.perfect ? 'perfect' : adt <= WIN.great ? 'great' : 'good');
+
+  function judge(n, grade, now) {
+    S.counts[grade]++;
+    S.weight += WEIGHT[grade];
+    if (grade === 'miss') S.combo = 0;
+    else { S.combo++; S.maxCombo = Math.max(S.maxCombo, S.combo); }
+    S.popup = { grade, t: now };
+    if (grade !== 'miss') {
+      const p = ballAt(n.ball, now) || n.ball.frames[0].p;
+      const [x, y] = px(p);
+      burst(x, y, n.wall, WALLS[n.wall].rgb, grade === 'perfect' ? 1 : 0.6);
+      S.flash[n.wall] = 1;
+    }
+  }
+
+  function press(wall, now) {
+    for (let i = S.cursor; i < S.notes.length; i++) {
+      const n = S.notes[i];
+      if (n.t > now + WIN.good) break;
+      if (n.wall !== wall || n.head) continue;
+      const dt = now - n.t;
+      if (Math.abs(dt) > WIN.good) continue;
+      n.head = gradeOf(Math.abs(dt));
+      judge(n, n.head, now);
+      if (!S.attract && !S.auto) audio.tick();
+      if (n.dur > 0) n.holding = true;
+      return;
+    }
+  }
+
+  function release(wall, now) {
+    for (let i = S.cursor; i < S.notes.length; i++) {
+      const n = S.notes[i];
+      if (n.t > now) break;
+      if (n.wall !== wall || !n.holding) continue;
+      n.holding = false;
+      n.tail = now >= n.end - 0.12 ? 'perfect' : 'miss';
+      judge(n, n.tail, now);
+    }
+  }
+
+  function updateJudge(now) {
+    for (let i = S.cursor; i < S.notes.length; i++) {
+      const n = S.notes[i];
+      if (n.t > now + WIN.good) break;
+      if (S.auto && !n.head && n.t <= now) {
+        n.head = 'perfect'; judge(n, 'perfect', now);
+        if (n.dur > 0) { n.holding = true; S.autoHold[n.wall] = n.end; } else S.autoHold[n.wall] = Math.max(S.autoHold[n.wall], now + 0.08);
+      }
+      if (!n.head && now - n.t > WIN.good) {
+        n.head = 'miss'; judge(n, 'miss', now);
+        if (n.dur > 0) { n.tail = 'miss'; judge(n, 'miss', now); }
+      }
+      if (n.holding && now >= n.end) { n.holding = false; n.tail = 'perfect'; judge(n, 'perfect', now); }
+    }
+    while (S.cursor < S.notes.length) {
+      const n = S.notes[S.cursor];
+      if (n.head && (n.dur === 0 || n.tail)) S.cursor++; else break;
+    }
+  }
+
+  // ===== Effects =====
+  const particles = [], rings = [];
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const INWARD = [[0, 1], [-1, 0], [0, -1], [1, 0]];
+  function burst(x, y, wall, col, power) {
+    rings.push({ x, y, wall, col, life: 0, max: 0.45 });
+    const n = reduceMotion ? 4 : Math.round(18 * power);
+    const base = Math.atan2(INWARD[wall][1], INWARD[wall][0]);
+    for (let i = 0; i < n; i++) {
+      const a = base + (Math.random() - 0.5) * 2.6, v = (120 + Math.random() * 300) * power;
+      particles.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 0, max: 0.3 + Math.random() * 0.4, col, size: 1.4 + Math.random() * 2.4 });
+    }
+  }
+  function drawEffects(dt) {
+    g.globalCompositeOperation = 'lighter';
+    for (let i = rings.length - 1; i >= 0; i--) {
+      const r = rings[i]; r.life += dt;
+      if (r.life > r.max) { rings.splice(i, 1); continue; }
+      const u = r.life / r.max;
+      const base = Math.atan2(INWARD[r.wall][1], INWARD[r.wall][0]);
+      g.strokeStyle = rgba(r.col, 0.85 * (1 - u));
+      g.lineWidth = 3 * (1 - u) + 1;
+      g.beginPath(); g.arc(r.x, r.y, ballR() * (1.5 + u * 5), base - Math.PI / 2, base + Math.PI / 2); g.stroke();
+    }
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i]; p.life += dt;
+      if (p.life > p.max) { particles.splice(i, 1); continue; }
+      p.vx *= 1 - dt * 2.2; p.vy *= 1 - dt * 2.2;
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      g.fillStyle = rgba(p.col, 1 - p.life / p.max);
+      g.beginPath(); g.arc(p.x, p.y, p.size, 0, Math.PI * 2); g.fill();
+    }
+    g.globalCompositeOperation = 'source-over';
+  }
+
+  function drawBackground(beat, pulse) {
+    const bg = g.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, rgba(INK, 1)); bg.addColorStop(1, rgba(INK2, 1));
+    g.fillStyle = bg; g.fillRect(0, 0, W, H);
+    const sec = SECTIONS[secIndex(Math.floor(beat / 4))];
+    const hue = WALLS[sec.hue].rgb;
+    const cx = R.x + R.w / 2, cy = R.y + R.h / 2;
+    const glow = g.createRadialGradient(cx, cy, 0, cx, cy, Math.max(R.w, R.h) * 0.8);
+    glow.addColorStop(0, rgba(hue, 0.1 + 0.08 * pulse)); glow.addColorStop(1, rgba(hue, 0));
+    g.fillStyle = glow; g.fillRect(0, 0, W, H);
+    // faint mirror tiles inside the box
+    g.strokeStyle = rgba(PAPER, 0.04); g.lineWidth = 1;
+    g.beginPath();
+    for (let i = 1; i < 8; i++) { const x = R.x + (R.w * i) / 8; g.moveTo(x, R.y); g.lineTo(x, R.y + R.h); }
+    for (let i = 1; i < 8; i++) { const y = R.y + (R.h * i) / 8; g.moveTo(R.x, y); g.lineTo(R.x + R.w, y); }
+    g.stroke();
+  }
+
+  const wallLine = (w) => (w === 0 ? [R.x, R.y, R.x + R.w, R.y] : w === 1 ? [R.x + R.w, R.y, R.x + R.w, R.y + R.h]
+    : w === 2 ? [R.x, R.y + R.h, R.x + R.w, R.y + R.h] : [R.x, R.y, R.x, R.y + R.h]);
+
+  function drawWalls(now, dt, pulse) {
+    g.lineCap = 'round';
+    for (let w = 0; w < 4; w++) {
+      const [x0, y0, x1, y1] = wallLine(w), col = WALLS[w].rgb;
+      const down = S.pressed[w] || S.autoHold[w] > now;
+      S.flash[w] = Math.max(0, S.flash[w] - dt * 3.5);
+      g.globalCompositeOperation = 'lighter';
+      g.strokeStyle = rgba(col, 0.12 + 0.1 * pulse + 0.35 * S.flash[w] + (down ? 0.25 : 0));
+      g.lineWidth = 18;
+      g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.stroke();
+      g.globalCompositeOperation = 'source-over';
+      g.strokeStyle = rgba(col, down ? 1 : 0.85); g.lineWidth = down ? 6 : 4;
+      g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.stroke();
+      drawKeyCap(w, down);
+    }
+  }
+
+  // Arrow and letter outside the middle of each wall.
+  function drawKeyCap(w, down) {
+    const col = WALLS[w].rgb, off = 26;
+    const [x0, y0, x1, y1] = wallLine(w);
+    const mx = (x0 + x1) / 2 - INWARD[w][0] * off, my = (y0 + y1) / 2 - INWARD[w][1] * off;
+    const ang = Math.atan2(-INWARD[w][1], -INWARD[w][0]);
+    g.save();
+    g.translate(mx, my);
+    g.fillStyle = rgba(col, down ? 1 : 0.85);
+    g.save(); g.rotate(ang);
+    g.beginPath(); g.moveTo(9, 0); g.lineTo(-5, -8); g.lineTo(-5, 8); g.closePath(); g.fill();
+    g.restore();
+    g.fillStyle = rgba(PAPER, 0.9);
+    g.font = '15px "Dela Gothic One", sans-serif';
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    const side = w % 2 === 0 ? [22, 1] : [0, 22];
+    g.fillText(WALLS[w].key, side[0], side[1]);
+    g.restore();
+  }
+
+  function drawBalls(now) {
+    const r = ballR();
+    const clampIn = ([x, y]) => [Math.min(R.x + R.w - r, Math.max(R.x + r, x)), Math.min(R.y + R.h - r, Math.max(R.y + r, y))];
+    for (const ball of BALLS) {
+      if (now < ball.first - VIEW || now > ball.last + 1.2) continue;
+      const F = ball.frames;
+      // fading light paths the ball has already drawn
+      g.lineCap = 'round';
+      for (let i = 0; i < F.length - 1; i++) {
+        const age = now - F[i + 1].t;
+        if (age < 0 || age > 1.1) continue;
+        const a = px(F[i].p), b = px(F[i + 1].p);
+        const col = WALLS[F[i + 1].note ? F[i + 1].note.wall : F[i + 1].tail.wall].rgb;
+        g.strokeStyle = rgba(col, 0.3 * (1 - age / 1.1)); g.lineWidth = 2;
+        g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke();
+      }
+      if (now > ball.last + 0.35) continue;
+      const pos = ballAt(ball, now);
+      if (!pos) continue;
+      const ni = nextStrike(ball, now);
+      const target = ni >= 0 ? F[ni] : null;
+      const holding = F.some((f) => f.tail && f.t > now && state.get(f.tail).holding);
+      // while sliding along a wall the ball wears that wall's colour, otherwise the colour of its next wall
+      const slide = F.find((f) => f.note && f.note.dur > 0 && f.t <= now && now < f.t + f.note.dur);
+      const lastF = F[F.length - 1];
+      const col = WALLS[slide ? slide.note.wall : target ? target.note.wall : (lastF.note || lastF.tail).wall].rgb;
+      const appear = Math.min(1, (now - (ball.first - VIEW)) / 0.25);
+      const fadeOut = now > ball.last ? 1 - (now - ball.last) / 0.35 : 1;
+      let prevMiss = false;
+      for (let i = F.length - 1; i >= 0; i--) if (F[i].note && F[i].t <= now) { prevMiss = state.get(F[i].note).head === 'miss'; break; }
+      const alpha = appear * fadeOut * (prevMiss ? 0.45 : 1);
+
+      // where it will strike next, and the bounce after that
+      if (target && target.t - now < VIEW) {
+        const tp = px(target.p), bp = clampIn(px(pos));
+        const k = Math.max(0, Math.min(1, (target.t - now) / (VIEW * 0.75)));
+        g.setLineDash([4, 6]);
+        g.strokeStyle = rgba(col, 0.28 * alpha); g.lineWidth = 1.5;
+        g.beginPath(); g.moveTo(bp[0], bp[1]); g.lineTo(tp[0], tp[1]); g.stroke();
+        const after = F.slice(ni + 1).find((f) => f.note);
+        if (after && after.t - now < VIEW * 1.6) {
+          const ap = px(after.p);
+          g.strokeStyle = rgba(WALLS[after.note.wall].rgb, 0.12 * alpha);
+          g.beginPath(); g.moveTo(tp[0], tp[1]); g.lineTo(ap[0], ap[1]); g.stroke();
+        }
+        g.setLineDash([]);
+        const w = target.note.wall;
+        const base = Math.atan2(INWARD[w][1], INWARD[w][0]);
+        g.strokeStyle = rgba(col, (0.25 + 0.75 * (1 - k)) * alpha); g.lineWidth = 2.5;
+        g.beginPath(); g.arc(tp[0], tp[1], r * (1.3 + 4 * k), base - Math.PI / 2, base + Math.PI / 2); g.stroke();
+        g.fillStyle = rgba(col, 0.9 * alpha);
+        g.beginPath(); g.arc(tp[0], tp[1], 3, 0, Math.PI * 2); g.fill();
+      }
+
+      const [bx, by] = clampIn(px(pos));
+      g.globalAlpha = alpha;
+      // short tail of afterimages
+      g.globalCompositeOperation = 'lighter';
+      for (let k = 1; k <= 10; k++) {
+        const pp = ballAt(ball, now - k * 0.018);
+        if (!pp) break;
+        const [tx, ty] = clampIn(px(pp));
+        g.fillStyle = rgba(col, 0.16 * (1 - k / 11));
+        g.beginPath(); g.arc(tx, ty, r * (1 - k / 14), 0, Math.PI * 2); g.fill();
+      }
+      g.fillStyle = rgba(col, holding ? 0.4 : 0.2);
+      g.beginPath(); g.arc(bx, by, r * (holding ? 2.6 : 2), 0, Math.PI * 2); g.fill();
+      // mirror images just beyond the nearest walls
+      for (let w = 0; w < 4; w++) {
+        const d = w === 0 ? by - R.y : w === 1 ? R.x + R.w - bx : w === 2 ? R.y + R.h - by : bx - R.x;
+        const lim = Math.min(R.w, R.h) * 0.25;
+        if (d > lim) continue;
+        const mx = w === 1 ? 2 * (R.x + R.w) - bx : w === 3 ? 2 * R.x - bx : bx;
+        const my = w === 0 ? 2 * R.y - by : w === 2 ? 2 * (R.y + R.h) - by : by;
+        g.strokeStyle = rgba(col, 0.45 * (1 - d / lim)); g.lineWidth = 1.5;
+        g.beginPath(); g.arc(mx, my, r * 0.8, 0, Math.PI * 2); g.stroke();
+      }
+      g.globalCompositeOperation = 'source-over';
+      g.fillStyle = rgba(col, 1);
+      g.beginPath(); g.arc(bx, by, r, 0, Math.PI * 2); g.fill();
+      g.fillStyle = rgba(PAPER, 0.95);
+      g.beginPath(); g.arc(bx - r * 0.25, by - r * 0.25, r * 0.38, 0, Math.PI * 2); g.fill();
+      g.globalAlpha = 1;
+    }
+  }
+
+  function secIndex(bar) {
+    let i = 0;
+    for (let k = 0; k < SECTIONS.length; k++) if (SECTIONS[k].bar <= bar) i = k;
+    return i;
+  }
+
+  const fmtScore = (n) => String(n).padStart(7, '0');
+  const currentScore = () => Math.round((1e6 * S.weight) / TOTAL_JUDGES);
+
+  function drawCentre(now) {
+    const cx = R.x + R.w / 2, cy = R.y + R.h / 2, u = Math.min(R.w, R.h);
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    const age = S.popup ? now - S.popup.t : Infinity;
+    if (age > 0.5) S.popup = null;
+    if (S.combo >= 5) {
+      g.fillStyle = rgba(PAPER, 0.12);
+      g.font = `${Math.round(u * 0.2)}px "Dela Gothic One", sans-serif`;
+      g.fillText(String(S.combo), cx, cy - u * 0.03);
+      g.font = '700 11px "Zen Kaku Gothic New", sans-serif';
+      g.fillStyle = rgba(PAPER, 0.28);
+      g.fillText('C O M B O', cx, cy + u * 0.1);
+    }
+    if (S.popup) {
+      const k = 1 + 0.25 * Math.max(0, 1 - age * 8);
+      g.save();
+      g.translate(cx, cy + u * 0.18); g.scale(k, k);
+      g.globalAlpha = Math.min(1, (0.5 - age) * 5);
+      g.font = `${Math.round(Math.min(22, u * 0.06))}px "Dela Gothic One", sans-serif`;
+      g.fillStyle = rgba(GRADE_COLOR[S.popup.grade], 1);
+      g.fillText(S.popup.grade.toUpperCase(), 0, 0);
+      g.restore();
+    }
+  }
+
+  function drawHud(now, beat) {
+    const top = Math.max(12, H * 0.02);
+    g.textBaseline = 'top';
+    g.textAlign = 'left'; g.fillStyle = rgba(PAPER, 0.95);
+    g.font = '22px "Dela Gothic One", sans-serif';
+    g.fillText(fmtScore(currentScore()), 18, top + 8);
+    const sec = SECTIONS[secIndex(Math.max(0, Math.floor(beat / 4)))];
+    g.textAlign = 'right'; g.fillStyle = rgba(MUTED, 1);
+    g.font = '700 12px "Zen Kaku Gothic New", sans-serif';
+    g.fillText(`${sec.name} ・ ${S.auto ? 'AUTO' : 'PLAY'}`, W - 18, top + 12);
+    const prog = Math.min(1, Math.max(0, now / (SONG_END - 0.8)));
+    g.fillStyle = rgba(PAPER, 0.12); g.fillRect(0, 0, W, 3);
+    g.fillStyle = rgba(WALLS[sec.hue].rgb, 0.9); g.fillRect(0, 0, W * prog, 3);
+  }
+
+  // ===== Audio =====
+  const audio = (() => {
+    let ac = null, out = null, noise = null, reverbIn = null, bus = null, master = null;
+    const PADV = 0.85;
+    const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
+
+    function init() {
+      ac = new (window.AudioContext || window.webkitAudioContext)();
+      const comp = ac.createDynamicsCompressor();
+      comp.threshold.value = -14; comp.ratio.value = 4; comp.attack.value = 0.004; comp.release.value = 0.2;
+      comp.connect(ac.destination);
+      master = ac.createGain(); master.gain.value = 0.75; master.connect(comp);
+      const len = ac.sampleRate;
+      noise = ac.createBuffer(1, len, ac.sampleRate);
+      const nd = noise.getChannelData(0);
+      for (let i = 0; i < len; i++) nd[i] = Math.random() * 2 - 1;
+      const irLen = Math.floor(ac.sampleRate * 2.2);
+      const ir = ac.createBuffer(2, irLen, ac.sampleRate);
+      for (let ch = 0; ch < 2; ch++) { const d = ir.getChannelData(ch); for (let i = 0; i < irLen; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / irLen, 3); }
+      const rev = ac.createConvolver(); rev.buffer = ir;
+      const revOut = ac.createGain(); revOut.gain.value = 0.3;
+      rev.connect(revOut); revOut.connect(master);
+      reverbIn = rev;
+    }
+
+    function newRun() {
+      if (out) { out.gain.setValueAtTime(0, ac.currentTime); setTimeout(((o) => () => o.disconnect())(out), 200); }
+      out = ac.createGain(); out.connect(master);
+      const mkBus = (v) => { const b = ac.createGain(); b.gain.value = v; b.connect(out); return b; };
+      bus = { drum: mkBus(0.9), bass: mkBus(0.8), pad: mkBus(PADV), lead: mkBus(0.6) };
+      const send = ac.createGain(); send.gain.value = 0.55; send.connect(reverbIn);
+      bus.pad.connect(send);
+      const leadSend = ac.createGain(); leadSend.gain.value = 0.3; bus.lead.connect(leadSend); leadSend.connect(reverbIn);
+      const delay = ac.createDelay(1); delay.delayTime.value = SPB * 0.75;
+      const fb = ac.createGain(); fb.gain.value = 0.28;
+      const dOut = ac.createGain(); dOut.gain.value = 0.22;
+      bus.lead.connect(delay); delay.connect(fb); fb.connect(delay); delay.connect(dOut); dOut.connect(out);
+    }
+
+    const decayGain = (at, peak, attack, decay) => {
+      const gn = ac.createGain();
+      gn.gain.setValueAtTime(0.0001, at);
+      gn.gain.exponentialRampToValueAtTime(peak, at + attack);
+      gn.gain.exponentialRampToValueAtTime(0.0001, at + attack + decay);
+      return gn;
+    };
+    const noiseSrc = (at, dur) => { const s = ac.createBufferSource(); s.buffer = noise; s.start(at, Math.random() * 0.5); s.stop(at + dur); return s; };
+
+    const I = {
+      kick(at) {
+        const o = ac.createOscillator(), gn = ac.createGain();
+        o.frequency.setValueAtTime(150, at); o.frequency.exponentialRampToValueAtTime(42, at + 0.13);
+        gn.gain.setValueAtTime(1, at); gn.gain.exponentialRampToValueAtTime(0.001, at + 0.42);
+        o.connect(gn).connect(bus.drum); o.start(at); o.stop(at + 0.45);
+        bus.pad.gain.setValueAtTime(PADV * 0.4, at); bus.pad.gain.linearRampToValueAtTime(PADV, at + 0.3);
+      },
+      snare(at) {
+        const f = ac.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 1700; f.Q.value = 0.8;
+        noiseSrc(at, 0.25).connect(f).connect(decayGain(at, 0.5, 0.002, 0.16)).connect(bus.drum);
+        const o = ac.createOscillator(); o.type = 'triangle'; o.frequency.setValueAtTime(180, at);
+        o.connect(decayGain(at, 0.3, 0.002, 0.08)).connect(bus.drum); o.start(at); o.stop(at + 0.12);
+      },
+      rim(at) {
+        const o = ac.createOscillator(); o.type = 'square'; o.frequency.value = 820;
+        const f = ac.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 1600;
+        o.connect(f).connect(decayGain(at, 0.12, 0.001, 0.03)).connect(bus.drum); o.start(at); o.stop(at + 0.05);
+      },
+      hat(at, open) {
+        const f = ac.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 7000;
+        noiseSrc(at, open ? 0.3 : 0.08).connect(f).connect(decayGain(at, open ? 0.14 : 0.1, 0.001, open ? 0.22 : 0.045)).connect(bus.drum);
+      },
+      crash(at) {
+        const f = ac.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 3800;
+        const gn = decayGain(at, 0.2, 0.002, 1.6);
+        noiseSrc(at, 1.7).connect(f).connect(gn); gn.connect(bus.drum); gn.connect(reverbIn);
+      },
+      bass(at, midi, dur) {
+        const f = ac.createBiquadFilter(); f.type = 'lowpass'; f.Q.value = 7;
+        f.frequency.setValueAtTime(1600, at); f.frequency.exponentialRampToValueAtTime(260, at + Math.max(0.08, dur * 0.8));
+        const gn = decayGain(at, 0.32, 0.004, dur);
+        const o = ac.createOscillator(); o.type = 'sawtooth'; o.frequency.value = mtof(midi);
+        const sub = ac.createOscillator(); sub.type = 'sine'; sub.frequency.value = mtof(midi);
+        const sg = ac.createGain(); sg.gain.value = 0.6;
+        o.connect(f); f.connect(gn); sub.connect(sg).connect(gn); gn.connect(bus.bass);
+        o.start(at); sub.start(at); o.stop(at + dur + 0.05); sub.stop(at + dur + 0.05);
+      },
+      pad(at, midis, dur) {
+        const f = ac.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 1200;
+        const gn = ac.createGain();
+        gn.gain.setValueAtTime(0, at); gn.gain.linearRampToValueAtTime(0.05, at + 0.3);
+        gn.gain.setValueAtTime(0.05, at + dur - 0.05); gn.gain.linearRampToValueAtTime(0, at + dur + 0.45);
+        f.connect(gn).connect(bus.pad);
+        for (const m of midis) for (const det of [-9, 9]) {
+          const o = ac.createOscillator(); o.type = 'sawtooth'; o.frequency.value = mtof(m); o.detune.value = det;
+          o.connect(f); o.start(at); o.stop(at + dur + 0.5);
+        }
+      },
+      // Marimba-like strike: a sine with a quickly fading fourth harmonic.
+      lead(at, midi, dur) {
+        const f0 = mtof(midi);
+        const gn = ac.createGain();
+        gn.gain.setValueAtTime(0.0001, at); gn.gain.exponentialRampToValueAtTime(0.32, at + 0.003);
+        if (dur < 0.3) gn.gain.exponentialRampToValueAtTime(0.0001, at + 0.45);
+        else { gn.gain.exponentialRampToValueAtTime(0.12, at + 0.15); gn.gain.setValueAtTime(0.12, at + dur); gn.gain.exponentialRampToValueAtTime(0.0001, at + dur + 0.3); }
+        gn.connect(bus.lead);
+        const end = at + Math.max(0.5, dur + 0.35);
+        const o1 = ac.createOscillator(); o1.type = 'sine'; o1.frequency.value = f0;
+        const o2 = ac.createOscillator(); o2.type = 'sine'; o2.frequency.value = f0 * 4;
+        const g2 = decayGain(at, 0.4, 0.001, 0.07);
+        const o3 = ac.createOscillator(); o3.type = 'triangle'; o3.frequency.value = f0;
+        const g3 = ac.createGain(); g3.gain.value = 0.25;
+        o1.connect(gn); o2.connect(g2).connect(gn); o3.connect(g3).connect(gn);
+        if (dur >= 0.3) {
+          // a hold slides along the wall: add a soft tremolo so it sings
+          const lfo = ac.createOscillator(); lfo.frequency.value = 8;
+          const lg = ac.createGain(); lg.gain.value = 0.04;
+          lfo.connect(lg).connect(gn.gain); lfo.start(at); lfo.stop(end);
+        }
+        for (const o of [o1, o2, o3]) { o.start(at); o.stop(end); }
+      },
+    };
+
+    function buildSong() {
+      const ev = [];
+      const add = (beat, fn, ...a) => ev.push({ t: beat * SPB, fn, a });
+      for (let bar = 0; bar < BARS_TOTAL; bar++) {
+        const b0 = bar * 4, ch = CHORDS[bar % 4], name = SECTIONS[secIndex(bar)].name;
+        add(b0, 'pad', ch.pad, 4 * SPB);
+        if (name === 'INTRO') {
+          if (bar >= 2) for (let i = 0; i < 4; i++) add(b0 + i + 0.5, 'rim');
+        } else if (name === 'VERSE') {
+          for (let i = 0; i < 4; i++) { add(b0 + i, 'kick'); add(b0 + i + 0.5, 'hat', false); }
+          add(b0 + 1.5, 'rim'); add(b0 + 3.75, 'rim');
+          for (const s of [0, 0.75, 1.5, 2, 2.75, 3.5]) add(b0 + s, 'bass', ch.bass, SPB * 0.4);
+        } else if (name === 'BUILD') {
+          for (let i = 0; i < 4; i++) add(b0 + i, 'kick');
+          for (let i = 0; i < 16; i++) add(b0 + i / 4, 'hat', false);
+          for (const s of [0, 0.75, 1.5, 2, 2.75, 3.5]) add(b0 + s, 'bass', ch.bass, SPB * 0.4);
+          if (bar === 19) for (let i = 8; i < 16; i++) add(b0 + i / 4, 'snare');
+          else { add(b0 + 1, 'snare'); add(b0 + 3, 'snare'); }
+        } else if (name === 'CHORUS' || name === 'CHORUS II') {
+          if (bar % 4 === 0) add(b0, 'crash');
+          for (let i = 0; i < 4; i++) {
+            add(b0 + i, 'kick');
+            add(b0 + i + 0.5, 'hat', true);
+            add(b0 + i + 0.25, 'hat', false); add(b0 + i + 0.75, 'hat', false);
+          }
+          for (const s of [0, 0.5, 0.75, 1.5, 2, 2.5, 2.75, 3.5]) add(b0 + s, 'bass', ch.bass + (s % 1 === 0.5 ? 12 : 0), SPB * 0.35);
+          add(b0 + 1, 'snare'); add(b0 + 3, 'snare');
+        } else if (name === 'BREAK') {
+          add(b0, 'bass', ch.bass, SPB * 3.5);
+          for (let i = 0; i < 4; i++) add(b0 + i + 0.5, 'rim');
+          if (bar === 31) { for (let i = 0; i < 4; i++) add(b0 + i, 'kick'); for (let i = 8; i < 16; i++) add(b0 + i / 4, 'snare'); }
+        } else if (name === 'OUTRO') {
+          if (bar === 40) add(b0, 'crash');
+          if (bar <= 41) { add(b0, 'kick'); add(b0 + 2, 'kick'); }
+          if (bar === 42) add(b0, 'bass', ch.bass, SPB * 4);
+        }
+      }
+      for (const n of CHART) add(n.beat, 'lead', CHORDS[Math.floor(n.beat / 4) % 4].lead[n.wall], n.dur);
+      ev.sort((a, b) => a.t - b.t);
+      return ev;
+    }
+
+    let song = [], idx = 0, start = 0, running = false;
+    function pump() {
+      if (!running) return;
+      const horizon = ac.currentTime + 0.3;
+      while (idx < song.length) {
+        const e = song[idx], at = start + e.t;
+        if (at > horizon) break;
+        if (at >= ac.currentTime - 0.02) I[e.fn](Math.max(at, ac.currentTime), ...e.a);
+        idx++;
+      }
+    }
+    setInterval(pump, 25);
+
+    let lastSong = -Infinity;
+    function songTime() {
+      let t;
+      if (ac.getOutputTimestamp) {
+        const ts = ac.getOutputTimestamp();
+        if (ts.contextTime > 0 && ts.performanceTime > 0) t = ts.contextTime + (performance.now() - ts.performanceTime) / 1000;
+      }
+      if (t === undefined) t = ac.currentTime - (ac.outputLatency || ac.baseLatency || 0);
+      t = t - start - settings.offset / 1000;
+      lastSong = Math.max(lastSong, t);
+      return lastSong;
+    }
+
+    return {
+      async start() {
+        if (!ac) init();
+        if (ac.state !== 'running') await ac.resume();
+        lastSong = -Infinity;
+        newRun();
+        song = buildSong(); idx = 0;
+        start = ac.currentTime + LEAD_IN;
+        running = true;
+        pump();
+      },
+      halt() { running = false; if (out) out.gain.setTargetAtTime(0, ac.currentTime, 0.05); },
+      songTime,
+      tick() {
+        if (!ac || !out) return;
+        const at = ac.currentTime;
+        const o = ac.createOscillator(); o.frequency.value = 1760;
+        o.connect(decayGain(at, 0.05, 0.001, 0.04)).connect(out); o.start(at); o.stop(at + 0.06);
+      },
+    };
+  })();
+
+  // ===== Modes =====
+  const titleWrap = $('#titleWrap'), resultWrap = $('#resultWrap');
+  const ATTRACT_FROM = 20 * 4 * SPB; // attract mode loops from the chorus
+
+  function enterTitle() {
+    audio.halt();
+    S.mode = 'title';
+    newRun(true, true);
+    S.attractT0 = performance.now() / 1000 - ATTRACT_FROM;
+    titleWrap.hidden = false; resultWrap.hidden = true;
+    rectGoal();
+    $('#startBtn').focus({ preventScroll: true });
+  }
+
+  async function startGame() {
+    titleWrap.hidden = true; resultWrap.hidden = true;
+    S.mode = 'play';
+    newRun(settings.auto, false);
+    rectGoal();
+    try { await audio.start(); } catch (e) { console.error(e); }
+  }
+
+  function showResult() {
+    audio.halt();
+    S.mode = 'result';
+    const sc = currentScore();
+    const rank = sc >= 980000 ? 'S+' : sc >= 950000 ? 'S' : sc >= 900000 ? 'A' : sc >= 800000 ? 'B' : 'C';
+    $('#resRank').textContent = S.auto ? 'AUTO' : rank;
+    $('#resScore').textContent = fmtScore(sc);
+    $('#resPerfect').textContent = S.counts.perfect;
+    $('#resGreat').textContent = S.counts.great;
+    $('#resGood').textContent = S.counts.good;
+    $('#resMiss').textContent = S.counts.miss;
+    $('#resCombo').textContent = `${S.maxCombo} / ${TOTAL_JUDGES}`;
+    resultWrap.hidden = false;
+    rectGoal();
+    $('#againBtn').focus({ preventScroll: true });
+  }
+
+  // ===== Input =====
+  const wallByCode = {};
+  WALLS.forEach((w, i) => w.codes.forEach((c) => { wallByCode[c] = i; }));
+  const keyDown = new Set();
+  const syncPressed = (w) => { S.pressed[w] = WALLS[w].codes.some((c) => keyDown.has(c)) || [...pointerWall.values()].includes(w); };
+  window.addEventListener('keydown', (e) => {
+    if (S.mode === 'play') {
+      if (e.code === 'Escape') { enterTitle(); return; }
+      const w = wallByCode[e.code];
+      if (w === undefined || S.auto) return;
+      e.preventDefault();
+      if (e.repeat || keyDown.has(e.code)) return;
+      const was = S.pressed[w];
+      keyDown.add(e.code); syncPressed(w);
+      if (!was) press(w, audio.songTime());
+    } else if (S.mode === 'title' && (e.code === 'Space' || e.code === 'Enter') && !(e.target instanceof HTMLButtonElement)) {
+      e.preventDefault(); startGame();
+    } else if (S.mode === 'result' && e.code === 'Escape') enterTitle();
+  });
+  window.addEventListener('keyup', (e) => {
+    keyDown.delete(e.code);
+    const w = wallByCode[e.code];
+    if (w === undefined || S.mode !== 'play' || S.auto) return;
+    syncPressed(w);
+    if (!S.pressed[w]) release(w, audio.songTime());
+  });
+
+  // Touch: the box's diagonals split the screen into four wedges, one per wall.
+  const pointerWall = new Map();
+  cv.addEventListener('pointerdown', (e) => {
+    if (S.mode !== 'play' || S.auto) return;
+    e.preventDefault();
+    const nx = (e.clientX - (R.x + R.w / 2)) / (R.w / 2), ny = (e.clientY - (R.y + R.h / 2)) / (R.h / 2);
+    const w = Math.abs(ny) > Math.abs(nx) ? (ny < 0 ? 0 : 2) : (nx > 0 ? 1 : 3);
+    const was = S.pressed[w];
+    pointerWall.set(e.pointerId, w); syncPressed(w);
+    if (!was) press(w, audio.songTime());
+  });
+  const endPointer = (e) => {
+    const w = pointerWall.get(e.pointerId);
+    if (w === undefined) return;
+    pointerWall.delete(e.pointerId); syncPressed(w);
+    if (!S.pressed[w]) release(w, audio.songTime());
+  };
+  cv.addEventListener('pointerup', endPointer);
+  cv.addEventListener('pointercancel', endPointer);
+
+  // Settings UI
+  const speed = $('#speed'), offset = $('#offset'), auto = $('#auto');
+  const syncUi = () => {
+    speed.value = settings.speed; $('#speedOut').textContent = Number(settings.speed).toFixed(1);
+    offset.value = settings.offset; $('#offsetOut').textContent = `${settings.offset > 0 ? '+' : ''}${settings.offset} ms`;
+    auto.checked = !!settings.auto;
+    VIEW = 1.4 / settings.speed;
+  };
+  speed.addEventListener('input', () => { settings.speed = +speed.value; syncUi(); saveSettings(); });
+  offset.addEventListener('input', () => { settings.offset = +offset.value; syncUi(); saveSettings(); });
+  auto.addEventListener('change', () => { settings.auto = auto.checked; saveSettings(); });
+  $('#startBtn').addEventListener('click', startGame);
+  $('#againBtn').addEventListener('click', startGame);
+  $('#backBtn').addEventListener('click', enterTitle);
+
+  // ===== Main loop =====
+  let lastFrame = performance.now();
+  function frame(ts) {
+    const dt = Math.min(0.05, (ts - lastFrame) / 1000);
+    lastFrame = ts;
+    let now;
+    if (S.mode === 'play') {
+      now = audio.songTime();
+      if (!isFinite(now)) now = -LEAD_IN;
+    } else {
+      now = ts / 1000 - S.attractT0;
+      if (now > SONG_END - 1) { newRun(true, true); S.attractT0 = ts / 1000 - ATTRACT_FROM; now = ATTRACT_FROM; }
+    }
+    const ease = Math.min(1, dt * 4);
+    for (const k of ['x', 'y', 'w', 'h']) R[k] += (RG[k] - R[k]) * ease;
+
+    const beat = now / SPB;
+    const sec = SECTIONS[secIndex(Math.floor(beat / 4))];
+    const kickOn = !['INTRO', 'BREAK'].includes(sec.name) || Math.floor(beat / 4) === 31;
+    const pulse = beat >= 0 && kickOn ? Math.exp(-(beat - Math.floor(beat)) * 5) : 0;
+
+    updateJudge(now);
+    drawBackground(beat, pulse);
+    if (S.mode === 'play') drawCentre(now);
+    drawBalls(now);
+    drawWalls(now, dt, pulse);
+    drawEffects(dt);
+    if (S.mode === 'play') drawHud(now, beat);
+    if (S.mode === 'play' && now > SONG_END) showResult();
+    requestAnimationFrame(frame);
+  }
+
+  window.addEventListener('resize', () => { resize(); });
+  syncUi();
+  resize();
+  enterTitle();
+  requestAnimationFrame(frame);
+  if (document.fonts && document.fonts.load) document.fonts.load('20px "Dela Gothic One"').catch(() => {});
+  window.__kagami = { S, CHART, BALLS, startGame };
+})();
+</script>
+</body>
+</html>
