@@ -1,0 +1,934 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Hotaru Dance</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=Zen+Kaku+Gothic+New:wght@400;700&display=swap">
+<style>
+  :root {
+    /* Layout: full-bleed night canvas where four firefly receptors dance in the free area; HTML panels float over it for title and results */
+    --ink: #060d0b;
+    --ink-2: #0f2019;
+    --panel: rgba(6, 13, 11, 0.84);
+    --paper: #eef6ee;
+    --muted: #98ad9f;
+    --line: rgba(238, 246, 238, 0.16);
+    --r0: #a6f05a; /* 若葉 D */
+    --r1: #ffc84a; /* 山吹 F */
+    --r2: #5ad8ff; /* 空   J */
+    --r3: #ff7ab0; /* 撫子 K */
+    --font-display: "Dela Gothic One", "Zen Kaku Gothic New", "Hiragino Sans", sans-serif;
+    --font-body: "Zen Kaku Gothic New", "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+    color-scheme: dark;
+  }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; margin: 0; overflow: hidden; background: var(--ink); color: var(--paper); font-family: var(--font-body); }
+  canvas#stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+
+  .panel-wrap {
+    position: fixed; inset: 0; display: flex; align-items: flex-end; justify-content: flex-start;
+    padding-block: max(20px, env(safe-area-inset-bottom, 0px)) max(20px, env(safe-area-inset-bottom, 0px));
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    pointer-events: none;
+  }
+  .panel {
+    pointer-events: auto; width: min(440px, 100%); box-sizing: border-box;
+    background: var(--panel); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--line); border-radius: 14px; padding: 22px 22px 18px;
+    display: grid; gap: 16px;
+  }
+  .brand { display: grid; gap: 4px; }
+  h1 { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: 2.7rem; line-height: 1; letter-spacing: 0.06em; }
+  h1 span:nth-child(4n+1) { color: var(--r0); }
+  h1 span:nth-child(4n+2) { color: var(--r1); }
+  h1 span:nth-child(4n+3) { color: var(--r2); }
+  h1 span:nth-child(4n+4) { color: var(--r3); }
+  .sub { margin: 0; color: var(--muted); font-size: 0.86rem; letter-spacing: 0.08em; }
+  .lede { margin: 0; line-height: 1.75; font-size: 0.95rem; }
+  .lede strong { color: var(--r1); font-weight: 700; }
+
+  .keys { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .keys li { display: grid; justify-items: center; gap: 4px; padding: 8px 0 6px; border-radius: 10px; border: 1.5px solid var(--c); background: color-mix(in srgb, var(--c) 14%, transparent); }
+  .keys kbd { font-family: var(--font-display); font-size: 1.3rem; color: var(--paper); }
+  .keys span { font-size: 0.78rem; color: var(--c); font-weight: 700; letter-spacing: 0.1em; }
+
+  .settings { display: grid; gap: 10px; }
+  .row { display: grid; grid-template-columns: 8.5em 1fr 4.2em; align-items: center; gap: 10px; font-size: 0.86rem; }
+  .row output { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .row small { grid-column: 2 / 4; color: var(--muted); font-size: 0.74rem; margin-top: -6px; }
+  input[type=range] { width: 100%; accent-color: var(--r0); }
+  .check { display: flex; align-items: center; gap: 8px; font-size: 0.86rem; cursor: pointer; }
+  .check input { accent-color: var(--r0); width: 16px; height: 16px; }
+
+  .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+  button {
+    font: inherit; font-weight: 700; cursor: pointer; border-radius: 999px; padding: 10px 22px;
+    border: 1.5px solid var(--line); background: transparent; color: var(--paper);
+  }
+  button.primary { background: var(--paper); color: var(--ink); border-color: var(--paper); }
+  button:hover { border-color: var(--paper); }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--r1); outline-offset: 2px; }
+  .hint { color: var(--muted); font-size: 0.76rem; }
+  .meta { margin: 0; color: var(--muted); font-size: 0.74rem; border-top: 1px solid var(--line); padding-top: 12px; }
+
+  .eyebrow { margin: 0; font-size: 0.74rem; letter-spacing: 0.24em; color: var(--muted); }
+  .result-head { display: flex; align-items: baseline; gap: 16px; }
+  .rank { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: 4rem; line-height: 1; color: var(--r1); }
+  .score { font-family: var(--font-display); font-size: 2rem; font-variant-numeric: tabular-nums; }
+  .stats { margin: 0; display: grid; grid-template-columns: 1fr auto; gap: 6px 16px; font-size: 0.9rem; }
+  .stats dt { color: var(--muted); letter-spacing: 0.08em; }
+  .stats dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
+
+  @media (min-width: 900px) {
+    .panel-wrap { align-items: center; padding-left: max(48px, env(safe-area-inset-left, 0px)); }
+  }
+  @media (max-height: 700px) and (max-width: 899px) {
+    .lede, .meta { display: none; }
+  }
+</style>
+</head>
+<body>
+<canvas id="stage" aria-label="プレイ画面"></canvas>
+
+<div class="panel-wrap" id="titleWrap">
+  <section class="panel" aria-labelledby="gameTitle">
+    <div class="brand">
+      <h1 id="gameTitle" aria-label="HOTARU"><span>H</span><span>O</span><span>T</span><span>A</span><span>R</span><span>U</span></h1>
+      <p class="sub">蛍の舞 ・ 踊るレセプターのプロトタイプ</p>
+    </div>
+    <p class="lede">4匹の蛍（受け皿）が曲に合わせて踊ります。光の筋が曲線を描いて蛍を追いかけ、<strong>蛍に届いた瞬間</strong>に、その蛍の色のキーを押します。</p>
+    <ul class="keys" aria-label="キーと蛍の色の対応">
+      <li style="--c: var(--r0)"><kbd>D</kbd><span>若葉</span></li>
+      <li style="--c: var(--r1)"><kbd>F</kbd><span>山吹</span></li>
+      <li style="--c: var(--r2)"><kbd>J</kbd><span>空</span></li>
+      <li style="--c: var(--r3)"><kbd>K</kbd><span>撫子</span></li>
+    </ul>
+    <div class="settings">
+      <div class="row">
+        <label for="speed">ハイスピード</label>
+        <input type="range" id="speed" min="0.6" max="2.4" step="0.1" value="1">
+        <output id="speedOut" for="speed">1.0</output>
+      </div>
+      <div class="row">
+        <label for="offset">判定オフセット</label>
+        <input type="range" id="offset" min="-200" max="200" step="5" value="0">
+        <output id="offsetOut" for="offset">0 ms</output>
+        <small>音が遅れて聞こえるときは ＋ 側へ</small>
+      </div>
+      <label class="check"><input type="checkbox" id="auto"> オートプレイで見る</label>
+    </div>
+    <div class="actions">
+      <button class="primary" id="startBtn" type="button">演奏する</button>
+      <span class="hint">Space で開始 ・ プレイ中は Esc で中断 ・ スマホは蛍をタップ</span>
+    </div>
+    <p class="meta">BPM 132 ・ 44小節 ・ 約1分20秒 ・ 曲はブラウザ内でリアルタイム合成</p>
+  </section>
+</div>
+
+<div class="panel-wrap" id="resultWrap" hidden>
+  <section class="panel" aria-labelledby="resRank">
+    <p class="eyebrow">RESULT</p>
+    <div class="result-head">
+      <h2 class="rank" id="resRank">S</h2>
+      <div class="score" id="resScore">0</div>
+    </div>
+    <dl class="stats">
+      <dt>PERFECT</dt><dd id="resPerfect">0</dd>
+      <dt>GREAT</dt><dd id="resGreat">0</dd>
+      <dt>GOOD</dt><dd id="resGood">0</dd>
+      <dt>MISS</dt><dd id="resMiss">0</dd>
+      <dt>MAX COMBO</dt><dd id="resCombo">0</dd>
+    </dl>
+    <div class="actions">
+      <button class="primary" id="againBtn" type="button">もう一度</button>
+      <button id="backBtn" type="button">タイトルへ</button>
+    </div>
+  </section>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  // ===== Song =====
+  const BPM = 132;
+  const SPB = 60 / BPM;
+  const LEAD_IN = 2.2;
+
+  const css = getComputedStyle(document.documentElement);
+  const hex = (v) => {
+    const h = css.getPropertyValue(v).trim().replace('#', '');
+    return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
+  };
+  const INK = hex('--ink'), INK2 = hex('--ink-2'), PAPER = hex('--paper'), MUTED = hex('--muted');
+  const LANES = [
+    { code: 'KeyD', label: 'D', rgb: hex('--r0') },
+    { code: 'KeyF', label: 'F', rgb: hex('--r1') },
+    { code: 'KeyJ', label: 'J', rgb: hex('--r2') },
+    { code: 'KeyK', label: 'K', rgb: hex('--r3') },
+  ];
+  const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+
+  const SECTIONS = [
+    { bar: 0, name: 'INTRO', hue: 2 },
+    { bar: 4, name: 'VERSE', hue: 0 },
+    { bar: 12, name: 'BUILD', hue: 1 },
+    { bar: 20, name: 'CHORUS', hue: 3 },
+    { bar: 28, name: 'BREAK', hue: 2 },
+    { bar: 32, name: 'CHORUS II', hue: 3 },
+    { bar: 40, name: 'OUTRO', hue: 0 },
+  ];
+  const BARS_TOTAL = 44;
+  const SONG_END = BARS_TOTAL * 4 * SPB + 0.8;
+
+  // Chart: one string per bar, 16 steps. '0'-'3' = tap on that firefly,
+  // 'a'-'d' = hold on firefly 0-3 lasting while '-' follows. Arrays stack layers for chords.
+  const BARS = [
+    '0...1...2...3...', '3...2...1...0...', '0...2...1...3...', 'a-------2...3...',
+    '0...1.2.3...2.1.', '0...3...1...2...', '0.1...2.3...2...', 'b-------0...3...',
+    '3...2.1.0...1.2.', '3...0...2...1...', '3.2...1.0...1...', 'c-------3.2.1.0.',
+    '0.1.2.3.0.1.2.3.', '3.2.1.0.3.2.1.0.', ['0...1...2...3...', '2...3...0...1...'], '0.2.1.3.0.2.1.3.',
+    '0.1.0.1.2.3.2.3.', ['0...0...3...3...', '..1...1...2...2.'], '0.1.2.3.3.2.1.0.', '0.1.2.3.01230123',
+    ['0...2...0...2...', '..1...3...1...3.'], 'a-------1.2.3.2.', ['3...1...3...1...', '..2...0...2...0.'], 'd-------0.1.0123',
+    '0.1.2.3.0.1.2.3.', ['0...1...2...3...', '3...2...1...0...'], ['b-------........', '....0.3.0.3.2.3.'], '0123..3210..0.3.',
+    'a-------c-------', 'b-------d-------', ['a---------------', '........c-------'], 'd-------0.1.2.3.',
+    '0.2.1.3.0.2.1.3.', ['0...1...2...3...', '2...3...0...1...'], '0.1.2.3.01233210', 'c-------1.0.1.0.',
+    ['0...2...0...2...', '..1...3...1...3.'], '3.2.1.0.3.2.1.0.', ['0.0.....3.3.....', '....1.2.....2.1.'], ['0.1.2.3.0.1.2.3.', '........3.....0.'],
+    ['0...............', '3...............'], '1...2...1...2...', ['a---------------', 'd---------------'], '................',
+  ];
+
+  // Dances: where each firefly sits, in units of the play area (x right, y down), at a beat.
+  const TAU = Math.PI * 2;
+  const DANCES = {
+    line: (l) => [(l - 1.5) * 0.4, 0.12],
+    wave: (l, b) => [(l - 1.5) * 0.42, 0.26 * Math.sin((b * Math.PI) / 2 + l * 1.1)],
+    diamond: (l, b) => { const a = (l * TAU) / 4 + (b * Math.PI) / 16; return [0.46 * Math.cos(a), 0.4 * Math.sin(a)]; },
+    spin: (l, b) => { const a = (l * TAU) / 4 + (b * Math.PI) / 4; return [0.42 * Math.cos(a), 0.36 * Math.sin(a)]; },
+    lissa: (l, b) => { const a = (b * Math.PI) / 8 + (l * Math.PI) / 2; return [0.6 * Math.sin(a), 0.4 * Math.sin(2 * a)]; },
+    pairs: (l, b) => {
+      const c = l < 2 ? -0.38 : 0.38, dir = l < 2 ? 1 : -1;
+      const a = ((b * Math.PI) / 4) * dir + (l % 2) * Math.PI;
+      return [c + 0.18 * Math.cos(a), 0.2 * Math.sin(a)];
+    },
+  };
+  // [bar, dance]; each change glides over 2 beats.
+  const DANCE_TL = [
+    [0, 'line'], [4, 'wave'], [12, 'diamond'], [16, 'spin'], [20, 'lissa'], [28, 'pairs'],
+    [32, 'lissa'], [34, 'spin'], [36, 'lissa'], [38, 'spin'], [40, 'line'],
+  ];
+
+  // G - Em - C - D. Lead pitch per firefly.
+  const CHORDS = [
+    { pad: [55, 59, 62], bass: 43, lead: [67, 71, 74, 79] },
+    { pad: [55, 59, 64], bass: 40, lead: [67, 71, 76, 79] },
+    { pad: [55, 60, 64], bass: 36, lead: [67, 72, 76, 79] },
+    { pad: [54, 57, 62], bass: 38, lead: [66, 69, 74, 78] },
+  ];
+
+  // ----- Parse chart -----
+  function mulberry32(a) {
+    return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  }
+  const rnd = mulberry32(132);
+  const CHART = [];
+  BARS.forEach((bar, bi) => {
+    for (const row of [].concat(bar)) {
+      if (row.length !== 16) console.warn(`bar ${bi}: ${row.length} steps`);
+      for (let i = 0; i < 16; i++) {
+        const c = row[i];
+        let lane = -1, len = 0;
+        if (c >= '0' && c <= '3') lane = +c;
+        else if (c >= 'a' && c <= 'd') {
+          lane = c.charCodeAt(0) - 97;
+          let j = i + 1;
+          while (j < 16 && row[j] === '-') j++;
+          len = j - i;
+        }
+        if (lane < 0) continue;
+        const beat = bi * 4 + i / 4;
+        // where the light stream comes from, and which way it curls
+        CHART.push({ beat, t: beat * SPB, lane, dur: (len / 4) * SPB, from: rnd() * TAU, curl: rnd() < 0.5 ? -1 : 1 });
+      }
+    }
+  });
+  CHART.sort((a, b) => a.t - b.t || a.lane - b.lane);
+  const TOTAL_JUDGES = CHART.reduce((n, c) => n + (c.dur > 0 ? 2 : 1), 0);
+
+  // ===== Settings =====
+  const settings = { speed: 1, offset: 0, auto: false };
+  try { Object.assign(settings, JSON.parse(localStorage.getItem('hotaru.settings') || '{}')); } catch (e) { /* storage unavailable */ }
+  const saveSettings = () => { try { localStorage.setItem('hotaru.settings', JSON.stringify(settings)); } catch (e) { /* ignore */ } };
+  let VIEW = 1.5 / settings.speed;
+
+  // ===== Canvas & layout =====
+  const $ = (s) => document.querySelector(s);
+  const cv = $('#stage');
+  const g = cv.getContext('2d');
+  let W = 0, H = 0, DPR = 1;
+  const A = { cx: 0, cy: 0, u: 1, portrait: false }, AG = { cx: 0, cy: 0, u: 1 };
+
+  function resize() {
+    DPR = Math.min(2, window.devicePixelRatio || 1);
+    W = window.innerWidth; H = window.innerHeight;
+    cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+    g.setTransform(DPR, 0, 0, DPR, 0, 0);
+    areaGoal();
+    Object.assign(A, AG);
+  }
+  function areaGoal() {
+    const top = Math.max(70, H * 0.09), bottom = Math.max(50, H * 0.06);
+    let x0 = 30, x1 = W - 30;
+    if (W >= 900 && S.mode !== 'play') x0 = Math.max(W * 0.42, 560);
+    const aw = x1 - x0, ah = H - top - bottom;
+    A.portrait = ah > aw * 1.2;
+    // dances span about ±0.65 across and ±0.5 down; on a tall screen they turn sideways
+    AG.u = A.portrait ? Math.min(aw / 2 / 0.55, ah / 2 / 0.7) : Math.min(aw / 2 / 0.7, ah / 2 / 0.55);
+    AG.cx = x0 + aw / 2; AG.cy = top + ah / 2;
+  }
+  const recR = () => Math.max(18, Math.min(36, A.u * 0.075));
+
+  function secIndex(bar) {
+    let i = 0;
+    for (let k = 0; k < SECTIONS.length; k++) if (SECTIONS[k].bar <= bar) i = k;
+    return i;
+  }
+  const kickBar = (bar) => { const n = SECTIONS[secIndex(bar)].name; return (n !== 'INTRO' && n !== 'BREAK') || bar === 31; };
+
+  // Screen position of firefly `l` at song time t.
+  function recPos(l, t) {
+    const beat = t / SPB;
+    let i = 0;
+    for (let k = 0; k < DANCE_TL.length; k++) if (DANCE_TL[k][0] * 4 <= beat) i = k;
+    let [x, y] = DANCES[DANCE_TL[i][1]](l, beat);
+    if (i > 0) {
+      const k = (beat - DANCE_TL[i][0] * 4) / 2;
+      if (k < 1) {
+        const [px0, py0] = DANCES[DANCE_TL[i - 1][1]](l, beat);
+        const e = 0.5 - 0.5 * Math.cos(Math.PI * Math.max(0, k));
+        x = px0 + (x - px0) * e; y = py0 + (y - py0) * e;
+      }
+    }
+    // a little hop on every kick: lands on the beat, peaks halfway
+    if (beat >= 0 && kickBar(Math.floor(beat / 4))) y -= 0.035 * Math.sin(Math.PI * (beat - Math.floor(beat)));
+    if (A.portrait) { const tx = x; x = -y; y = tx; }
+    return [A.cx + x * A.u, A.cy + y * A.u];
+  }
+
+  // Light stream for note n at time now: quadratic curve from its source to the firefly as it is now.
+  function streamPoint(n, k, now, end) {
+    const hit = recPos(n.lane, n.t);
+    const D = Math.max(W, H) * 0.75;
+    const sx = hit[0] + Math.cos(n.from) * D, sy = hit[1] + Math.sin(n.from) * D;
+    const mx = (sx + hit[0]) / 2, my = (sy + hit[1]) / 2;
+    const cx = mx - Math.sin(n.from) * D * 0.45 * n.curl, cy = my + Math.cos(n.from) * D * 0.45 * n.curl;
+    const e = end || recPos(n.lane, now);
+    const a = (1 - k) * (1 - k), b = 2 * (1 - k) * k, c = k * k;
+    return [a * sx + b * cx + c * e[0], a * sy + b * cy + c * e[1]];
+  }
+
+  // ===== Game state =====
+  const S = {
+    mode: 'title', notes: [], cursor: 0, auto: true, attract: true,
+    combo: 0, maxCombo: 0, counts: { perfect: 0, great: 0, good: 0, miss: 0 }, weight: 0,
+    pressed: [false, false, false, false], autoHold: [0, 0, 0, 0], flash: [0, 0, 0, 0],
+    popup: null, attractT0: 0,
+  };
+  const WIN = { perfect: 0.045, great: 0.09, good: 0.135 };
+  const WEIGHT = { perfect: 1, great: 0.7, good: 0.4, miss: 0 };
+  const GRADE_COLOR = { perfect: PAPER, great: LANES[1].rgb, good: LANES[2].rgb, miss: MUTED };
+
+  function newRun(auto, attract) {
+    S.notes = CHART.map((c) => ({ ...c, end: c.t + c.dur, head: null, tail: null, holding: false }));
+    S.cursor = 0; S.auto = auto; S.attract = attract;
+    S.combo = 0; S.maxCombo = 0; S.weight = 0;
+    S.counts = { perfect: 0, great: 0, good: 0, miss: 0 };
+    S.pressed.fill(false); S.autoHold.fill(0); S.flash.fill(0);
+    S.popup = null; particles.length = 0; rings.length = 0;
+  }
+
+  const gradeOf = (adt) => (adt <= WIN.perfect ? 'perfect' : adt <= WIN.great ? 'great' : 'good');
+
+  function judge(n, grade, now) {
+    S.counts[grade]++;
+    S.weight += WEIGHT[grade];
+    if (grade === 'miss') S.combo = 0;
+    else { S.combo++; S.maxCombo = Math.max(S.maxCombo, S.combo); }
+    S.popup = { grade, t: now, lane: n.lane };
+    if (grade !== 'miss') {
+      const [x, y] = recPos(n.lane, now);
+      burst(x, y, LANES[n.lane].rgb, grade === 'perfect' ? 1 : 0.6);
+      S.flash[n.lane] = 1;
+    }
+  }
+
+  function press(lane, now) {
+    for (let i = S.cursor; i < S.notes.length; i++) {
+      const n = S.notes[i];
+      if (n.t > now + WIN.good) break;
+      if (n.lane !== lane || n.head) continue;
+      const dt = now - n.t;
+      if (Math.abs(dt) > WIN.good) continue;
+      n.head = gradeOf(Math.abs(dt));
+      judge(n, n.head, now);
+      if (!S.attract && !S.auto) audio.tick();
+      if (n.dur > 0) n.holding = true;
+      return;
+    }
+  }
+
+  function release(lane, now) {
+    for (let i = S.cursor; i < S.notes.length; i++) {
+      const n = S.notes[i];
+      if (n.t > now) break;
+      if (n.lane !== lane || !n.holding) continue;
+      n.holding = false;
+      n.tail = now >= n.end - 0.12 ? 'perfect' : 'miss';
+      judge(n, n.tail, now);
+    }
+  }
+
+  function updateJudge(now) {
+    for (let i = S.cursor; i < S.notes.length; i++) {
+      const n = S.notes[i];
+      if (n.t > now + WIN.good) break;
+      if (S.auto && !n.head && n.t <= now) {
+        n.head = 'perfect'; judge(n, 'perfect', now);
+        if (n.dur > 0) { n.holding = true; S.autoHold[n.lane] = n.end; } else S.autoHold[n.lane] = Math.max(S.autoHold[n.lane], now + 0.08);
+      }
+      if (!n.head && now - n.t > WIN.good) {
+        n.head = 'miss'; judge(n, 'miss', now);
+        if (n.dur > 0) { n.tail = 'miss'; judge(n, 'miss', now); }
+      }
+      if (n.holding && now >= n.end) { n.holding = false; n.tail = 'perfect'; judge(n, 'perfect', now); }
+    }
+    while (S.cursor < S.notes.length) {
+      const n = S.notes[S.cursor];
+      if (n.head && (n.dur === 0 || n.tail)) S.cursor++; else break;
+    }
+  }
+
+  // ===== Effects =====
+  const particles = [], rings = [];
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function burst(x, y, col, power) {
+    rings.push({ x, y, col, life: 0, max: 0.4 });
+    const n = reduceMotion ? 4 : Math.round(18 * power);
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * TAU, v = (100 + Math.random() * 260) * power;
+      particles.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 40, life: 0, max: 0.4 + Math.random() * 0.5, col, size: 1.4 + Math.random() * 2.4 });
+    }
+  }
+  function drawEffects(dt) {
+    g.globalCompositeOperation = 'lighter';
+    for (let i = rings.length - 1; i >= 0; i--) {
+      const r = rings[i]; r.life += dt;
+      if (r.life > r.max) { rings.splice(i, 1); continue; }
+      const u = r.life / r.max;
+      g.strokeStyle = rgba(r.col, 0.85 * (1 - u));
+      g.lineWidth = 3 * (1 - u) + 1;
+      g.beginPath(); g.arc(r.x, r.y, recR() * (1.1 + u * 1.8), 0, TAU); g.stroke();
+    }
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i]; p.life += dt;
+      if (p.life > p.max) { particles.splice(i, 1); continue; }
+      p.vx *= 1 - dt * 2; p.vy = p.vy * (1 - dt * 2) - 30 * dt;
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      g.fillStyle = rgba(p.col, 1 - p.life / p.max);
+      g.beginPath(); g.arc(p.x, p.y, p.size, 0, TAU); g.fill();
+    }
+    g.globalCompositeOperation = 'source-over';
+  }
+
+  // Night pond: soft drifting lights behind everything.
+  const bokeh = Array.from({ length: reduceMotion ? 0 : 46 }, (_, i) => ({ x: Math.random(), y: Math.random(), r: 6 + Math.random() * 26, s: 0.004 + Math.random() * 0.012, c: i % 4, ph: Math.random() * TAU }));
+  function drawBackground(now, beat, pulse, dt) {
+    const bg = g.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, rgba(INK, 1)); bg.addColorStop(1, rgba(INK2, 1));
+    g.fillStyle = bg; g.fillRect(0, 0, W, H);
+    const hue = LANES[SECTIONS[secIndex(Math.floor(beat / 4))].hue].rgb;
+    const glow = g.createRadialGradient(A.cx, A.cy, 0, A.cx, A.cy, A.u * 1.1);
+    glow.addColorStop(0, rgba(hue, 0.09 + 0.07 * pulse)); glow.addColorStop(1, rgba(hue, 0));
+    g.fillStyle = glow; g.fillRect(0, 0, W, H);
+    g.globalCompositeOperation = 'lighter';
+    for (const b of bokeh) {
+      b.y -= b.s * dt; b.x += Math.sin(now * 0.3 + b.ph) * 0.0006;
+      if (b.y < -0.05) { b.y = 1.05; b.x = Math.random(); }
+      const a = 0.035 + 0.03 * Math.sin(now * 1.3 + b.ph);
+      g.fillStyle = rgba(LANES[b.c].rgb, Math.max(0, a));
+      g.beginPath(); g.arc(b.x * W, b.y * H, b.r, 0, TAU); g.fill();
+    }
+    g.globalCompositeOperation = 'source-over';
+  }
+
+  function drawStreams(now) {
+    const r = recR();
+    g.lineCap = 'round';
+    for (let i = S.notes.length - 1; i >= 0; i--) {
+      const n = S.notes[i];
+      if (n.t - now > VIEW || n.end < now - 0.1) continue;
+      const col = LANES[n.lane].rgb;
+      const end = recPos(n.lane, now);
+      const kHead = Math.min(1, 1 - (n.t - now) / VIEW);
+      if (n.dur > 0 && n.tail === null && n.head !== 'miss') {
+        // a hold is a long ribbon: its tail travels the same curve one hold-length later
+        const kTail = Math.max(0, 1 - (n.end - now) / VIEW);
+        const k0 = kTail, k1 = n.holding ? 1 : Math.max(0, kHead);
+        if (k1 > k0) {
+          g.beginPath();
+          const steps = 24;
+          for (let s = 0; s <= steps; s++) {
+            const [x, y] = streamPoint(n, k0 + ((k1 - k0) * s) / steps, now, end);
+            if (s === 0) g.moveTo(x, y); else g.lineTo(x, y);
+          }
+          g.globalCompositeOperation = 'lighter';
+          g.strokeStyle = rgba(col, n.holding ? 0.35 : 0.22); g.lineWidth = r * 0.9; g.stroke();
+          g.globalCompositeOperation = 'source-over';
+          g.strokeStyle = rgba(col, 0.9); g.lineWidth = 2.5; g.stroke();
+        }
+      }
+      if (n.head || kHead < 0) continue;
+      // approach ring closing on the firefly
+      const k = (n.t - now) / (VIEW * 0.6);
+      if (k < 1) {
+        g.strokeStyle = rgba(col, 0.25 + 0.6 * (1 - k)); g.lineWidth = 2;
+        g.beginPath(); g.arc(end[0], end[1], r * (1 + 1.8 * Math.max(0, k)), 0, TAU); g.stroke();
+      }
+      // comet: bright head with a tail along its curve
+      const appear = Math.min(1, kHead / 0.08);
+      g.globalCompositeOperation = 'lighter';
+      for (let s = 12; s >= 1; s--) {
+        const kk = kHead - s * 0.012;
+        if (kk < 0) continue;
+        const [x, y] = streamPoint(n, kk, now, end);
+        g.fillStyle = rgba(col, 0.2 * (1 - s / 13) * appear);
+        g.beginPath(); g.arc(x, y, r * 0.42 * (1 - s / 16), 0, TAU); g.fill();
+      }
+      const [hx, hy] = streamPoint(n, kHead, now, end);
+      g.fillStyle = rgba(col, 0.35 * appear);
+      g.beginPath(); g.arc(hx, hy, r * 0.75, 0, TAU); g.fill();
+      g.globalCompositeOperation = 'source-over';
+      g.fillStyle = rgba(col, appear);
+      g.beginPath(); g.arc(hx, hy, r * 0.32, 0, TAU); g.fill();
+      g.fillStyle = rgba(PAPER, 0.9 * appear);
+      g.beginPath(); g.arc(hx, hy, r * 0.14, 0, TAU); g.fill();
+    }
+  }
+
+  function drawFireflies(now, dt) {
+    const r = recR();
+    // the path each firefly has just danced
+    g.lineCap = 'round';
+    for (let l = 0; l < 4; l++) {
+      g.beginPath();
+      for (let s = 0; s <= 16; s++) {
+        const [x, y] = recPos(l, now - s * 0.03);
+        if (s === 0) g.moveTo(x, y); else g.lineTo(x, y);
+      }
+      g.strokeStyle = rgba(LANES[l].rgb, 0.18); g.lineWidth = r * 0.35; g.stroke();
+    }
+    for (let l = 0; l < 4; l++) {
+      const [x, y] = recPos(l, now), col = LANES[l].rgb;
+      const down = S.pressed[l] || S.autoHold[l] > now;
+      S.flash[l] = Math.max(0, S.flash[l] - dt * 4);
+      const aura = g.createRadialGradient(x, y, r * 0.4, x, y, r * 2.6);
+      aura.addColorStop(0, rgba(col, 0.32 + 0.3 * S.flash[l] + (down ? 0.15 : 0))); aura.addColorStop(1, rgba(col, 0));
+      g.globalCompositeOperation = 'lighter';
+      g.fillStyle = aura; g.beginPath(); g.arc(x, y, r * 2.6, 0, TAU); g.fill();
+      g.globalCompositeOperation = 'source-over';
+      g.fillStyle = down ? rgba(col, 0.6) : rgba(INK, 0.8);
+      g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill();
+      g.strokeStyle = rgba(col, 1); g.lineWidth = 3; g.stroke();
+      g.fillStyle = rgba(PAPER, 0.95);
+      g.font = `${Math.round(r * 0.9)}px "Dela Gothic One", sans-serif`;
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText(LANES[l].label, x, y + 1);
+    }
+  }
+
+  const fmtScore = (n) => String(n).padStart(7, '0');
+  const currentScore = () => Math.round((1e6 * S.weight) / TOTAL_JUDGES);
+
+  function drawHud(now, beat) {
+    const top = Math.max(12, H * 0.02);
+    g.textBaseline = 'top';
+    g.textAlign = 'left'; g.fillStyle = rgba(PAPER, 0.95);
+    g.font = '22px "Dela Gothic One", sans-serif';
+    g.fillText(fmtScore(currentScore()), 18, top + 8);
+    if (S.combo >= 5) {
+      g.font = '700 13px "Zen Kaku Gothic New", sans-serif';
+      g.fillStyle = rgba(PAPER, 0.7);
+      g.fillText(`${S.combo} COMBO`, 18, top + 38);
+    }
+    const sec = SECTIONS[secIndex(Math.max(0, Math.floor(beat / 4)))];
+    g.textAlign = 'right'; g.fillStyle = rgba(MUTED, 1);
+    g.font = '700 12px "Zen Kaku Gothic New", sans-serif';
+    g.fillText(`${sec.name} ・ ${S.auto ? 'AUTO' : 'PLAY'}`, W - 18, top + 12);
+    const prog = Math.min(1, Math.max(0, now / (SONG_END - 0.8)));
+    g.fillStyle = rgba(PAPER, 0.12); g.fillRect(0, 0, W, 3);
+    g.fillStyle = rgba(LANES[sec.hue].rgb, 0.9); g.fillRect(0, 0, W * prog, 3);
+    // the judgement floats just above the firefly that was hit
+    if (S.popup) {
+      const age = now - S.popup.t;
+      if (age > 0.5) S.popup = null;
+      else {
+        const [x, y] = recPos(S.popup.lane, now);
+        const k = 1 + 0.25 * Math.max(0, 1 - age * 8);
+        g.save();
+        g.translate(x, y - recR() * 1.9 - age * 30); g.scale(k, k);
+        g.globalAlpha = Math.min(1, (0.5 - age) * 5);
+        g.textAlign = 'center'; g.textBaseline = 'middle';
+        g.font = '15px "Dela Gothic One", sans-serif';
+        g.fillStyle = rgba(GRADE_COLOR[S.popup.grade], 1);
+        g.fillText(S.popup.grade.toUpperCase(), 0, 0);
+        g.restore();
+      }
+    }
+  }
+
+  // ===== Audio =====
+  const audio = (() => {
+    let ac = null, out = null, noise = null, reverbIn = null, bus = null, master = null;
+    const PADV = 0.85;
+    const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
+
+    function init() {
+      ac = new (window.AudioContext || window.webkitAudioContext)();
+      const comp = ac.createDynamicsCompressor();
+      comp.threshold.value = -14; comp.ratio.value = 4; comp.attack.value = 0.004; comp.release.value = 0.2;
+      comp.connect(ac.destination);
+      master = ac.createGain(); master.gain.value = 0.75; master.connect(comp);
+      const len = ac.sampleRate;
+      noise = ac.createBuffer(1, len, ac.sampleRate);
+      const nd = noise.getChannelData(0);
+      for (let i = 0; i < len; i++) nd[i] = Math.random() * 2 - 1;
+      const irLen = Math.floor(ac.sampleRate * 2.8);
+      const ir = ac.createBuffer(2, irLen, ac.sampleRate);
+      for (let ch = 0; ch < 2; ch++) { const d = ir.getChannelData(ch); for (let i = 0; i < irLen; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / irLen, 3); }
+      const rev = ac.createConvolver(); rev.buffer = ir;
+      const revOut = ac.createGain(); revOut.gain.value = 0.34;
+      rev.connect(revOut); revOut.connect(master);
+      reverbIn = rev;
+    }
+
+    function newRun() {
+      if (out) { out.gain.setValueAtTime(0, ac.currentTime); setTimeout(((o) => () => o.disconnect())(out), 200); }
+      out = ac.createGain(); out.connect(master);
+      const mkBus = (v) => { const b = ac.createGain(); b.gain.value = v; b.connect(out); return b; };
+      bus = { drum: mkBus(0.85), bass: mkBus(0.75), pad: mkBus(PADV), lead: mkBus(0.55) };
+      const send = ac.createGain(); send.gain.value = 0.6; send.connect(reverbIn);
+      bus.pad.connect(send);
+      const leadSend = ac.createGain(); leadSend.gain.value = 0.4; bus.lead.connect(leadSend); leadSend.connect(reverbIn);
+      const delay = ac.createDelay(1); delay.delayTime.value = SPB * 0.75;
+      const fb = ac.createGain(); fb.gain.value = 0.32;
+      const dOut = ac.createGain(); dOut.gain.value = 0.25;
+      bus.lead.connect(delay); delay.connect(fb); fb.connect(delay); delay.connect(dOut); dOut.connect(out);
+    }
+
+    const decayGain = (at, peak, attack, decay) => {
+      const gn = ac.createGain();
+      gn.gain.setValueAtTime(0.0001, at);
+      gn.gain.exponentialRampToValueAtTime(peak, at + attack);
+      gn.gain.exponentialRampToValueAtTime(0.0001, at + attack + decay);
+      return gn;
+    };
+    const noiseSrc = (at, dur) => { const s = ac.createBufferSource(); s.buffer = noise; s.start(at, Math.random() * 0.5); s.stop(at + dur); return s; };
+
+    const I = {
+      kick(at) {
+        const o = ac.createOscillator(), gn = ac.createGain();
+        o.frequency.setValueAtTime(150, at); o.frequency.exponentialRampToValueAtTime(44, at + 0.13);
+        gn.gain.setValueAtTime(0.95, at); gn.gain.exponentialRampToValueAtTime(0.001, at + 0.4);
+        o.connect(gn).connect(bus.drum); o.start(at); o.stop(at + 0.42);
+        bus.pad.gain.setValueAtTime(PADV * 0.4, at); bus.pad.gain.linearRampToValueAtTime(PADV, at + 0.28);
+      },
+      snare(at) {
+        const f = ac.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 1800; f.Q.value = 0.7;
+        noiseSrc(at, 0.25).connect(f).connect(decayGain(at, 0.48, 0.002, 0.2)).connect(bus.drum);
+        const o = ac.createOscillator(); o.type = 'triangle'; o.frequency.setValueAtTime(185, at);
+        o.connect(decayGain(at, 0.26, 0.002, 0.08)).connect(bus.drum); o.start(at); o.stop(at + 0.12);
+      },
+      shaker(at) {
+        const f = ac.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 6500; f.Q.value = 1.2;
+        noiseSrc(at, 0.08).connect(f).connect(decayGain(at, 0.12, 0.012, 0.05)).connect(bus.drum);
+      },
+      hat(at, open) {
+        const f = ac.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 7200;
+        noiseSrc(at, open ? 0.3 : 0.08).connect(f).connect(decayGain(at, open ? 0.13 : 0.1, 0.001, open ? 0.22 : 0.045)).connect(bus.drum);
+      },
+      crash(at) {
+        const f = ac.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 3800;
+        const gn = decayGain(at, 0.18, 0.002, 1.8);
+        noiseSrc(at, 1.9).connect(f).connect(gn); gn.connect(bus.drum); gn.connect(reverbIn);
+      },
+      bass(at, midi, dur) {
+        const f = ac.createBiquadFilter(); f.type = 'lowpass'; f.Q.value = 4;
+        f.frequency.setValueAtTime(900, at); f.frequency.exponentialRampToValueAtTime(200, at + Math.max(0.08, dur * 0.9));
+        const gn = decayGain(at, 0.34, 0.006, dur);
+        const o = ac.createOscillator(); o.type = 'triangle'; o.frequency.value = mtof(midi);
+        const sub = ac.createOscillator(); sub.type = 'sine'; sub.frequency.value = mtof(midi);
+        const sg = ac.createGain(); sg.gain.value = 0.7;
+        o.connect(f); f.connect(gn); sub.connect(sg).connect(gn); gn.connect(bus.bass);
+        o.start(at); sub.start(at); o.stop(at + dur + 0.05); sub.stop(at + dur + 0.05);
+      },
+      pad(at, midis, dur) {
+        const f = ac.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 1100;
+        const gn = ac.createGain();
+        gn.gain.setValueAtTime(0, at); gn.gain.linearRampToValueAtTime(0.05, at + 0.4);
+        gn.gain.setValueAtTime(0.05, at + dur - 0.05); gn.gain.linearRampToValueAtTime(0, at + dur + 0.5);
+        f.connect(gn).connect(bus.pad);
+        for (const m of midis) for (const det of [-10, 10]) {
+          const o = ac.createOscillator(); o.type = 'sawtooth'; o.frequency.value = mtof(m); o.detune.value = det;
+          o.connect(f); o.start(at); o.stop(at + dur + 0.55);
+        }
+      },
+      // Kalimba-like pluck: a sine whose pitch is briefly frequency-modulated, then rings out.
+      lead(at, midi, dur) {
+        const f0 = mtof(midi);
+        const gn = ac.createGain();
+        gn.gain.setValueAtTime(0.0001, at); gn.gain.exponentialRampToValueAtTime(0.3, at + 0.003);
+        if (dur < 0.3) gn.gain.exponentialRampToValueAtTime(0.0001, at + 0.6);
+        else { gn.gain.exponentialRampToValueAtTime(0.11, at + 0.2); gn.gain.setValueAtTime(0.11, at + dur); gn.gain.exponentialRampToValueAtTime(0.0001, at + dur + 0.4); }
+        gn.connect(bus.lead);
+        const end = at + Math.max(0.65, dur + 0.45);
+        const car = ac.createOscillator(); car.type = 'sine'; car.frequency.value = f0;
+        const mod = ac.createOscillator(); mod.type = 'sine'; mod.frequency.value = f0 * 3.5;
+        const mg = ac.createGain();
+        mg.gain.setValueAtTime(f0 * 1.6, at); mg.gain.exponentialRampToValueAtTime(1, at + 0.18);
+        mod.connect(mg).connect(car.frequency);
+        car.connect(gn);
+        car.start(at); mod.start(at); car.stop(end); mod.stop(end);
+      },
+    };
+
+    function buildSong() {
+      const ev = [];
+      const add = (beat, fn, ...a) => ev.push({ t: beat * SPB, fn, a });
+      for (let bar = 0; bar < BARS_TOTAL; bar++) {
+        const b0 = bar * 4, ch = CHORDS[bar % 4], name = SECTIONS[secIndex(bar)].name;
+        add(b0, 'pad', ch.pad, 4 * SPB);
+        if (name === 'INTRO') {
+          if (bar >= 2) for (let i = 0; i < 8; i++) add(b0 + i / 2, 'shaker');
+        } else if (name === 'VERSE') {
+          for (let i = 0; i < 4; i++) { add(b0 + i, 'kick'); add(b0 + i + 0.5, 'shaker'); add(b0 + i + 0.5, 'bass', ch.bass, SPB * 0.45); }
+        } else if (name === 'BUILD') {
+          for (let i = 0; i < 4; i++) { add(b0 + i, 'kick'); add(b0 + i + 0.5, 'bass', ch.bass, SPB * 0.45); }
+          for (let i = 0; i < 16; i++) add(b0 + i / 4, 'hat', false);
+          if (bar === 19) for (let i = 8; i < 16; i++) add(b0 + i / 4, 'snare');
+          else { add(b0 + 1, 'snare'); add(b0 + 3, 'snare'); }
+        } else if (name === 'CHORUS' || name === 'CHORUS II') {
+          if (bar % 4 === 0) add(b0, 'crash');
+          for (let i = 0; i < 4; i++) {
+            add(b0 + i, 'kick');
+            add(b0 + i, 'bass', ch.bass, SPB * 0.45);
+            add(b0 + i + 0.5, 'bass', ch.bass + 12, SPB * 0.45);
+            add(b0 + i + 0.5, 'hat', true);
+            add(b0 + i + 0.25, 'shaker'); add(b0 + i + 0.75, 'shaker');
+          }
+          add(b0 + 1, 'snare'); add(b0 + 3, 'snare');
+        } else if (name === 'BREAK') {
+          add(b0, 'bass', ch.bass, SPB * 3.5);
+          for (let i = 0; i < 8; i++) add(b0 + i / 2, 'shaker');
+          if (bar === 31) { for (let i = 0; i < 4; i++) add(b0 + i, 'kick'); for (let i = 8; i < 16; i++) add(b0 + i / 4, 'snare'); }
+        } else if (name === 'OUTRO') {
+          if (bar === 40) add(b0, 'crash');
+          if (bar <= 41) { add(b0, 'kick'); add(b0 + 2, 'kick'); }
+          if (bar === 42) add(b0, 'bass', ch.bass, SPB * 4);
+        }
+      }
+      for (const n of CHART) add(n.beat, 'lead', CHORDS[Math.floor(n.beat / 4) % 4].lead[n.lane], n.dur);
+      ev.sort((a, b) => a.t - b.t);
+      return ev;
+    }
+
+    let song = [], idx = 0, start = 0, running = false;
+    function pump() {
+      if (!running) return;
+      const horizon = ac.currentTime + 0.3;
+      while (idx < song.length) {
+        const e = song[idx], at = start + e.t;
+        if (at > horizon) break;
+        if (at >= ac.currentTime - 0.02) I[e.fn](Math.max(at, ac.currentTime), ...e.a);
+        idx++;
+      }
+    }
+    setInterval(pump, 25);
+
+    let lastSong = -Infinity;
+    function songTime() {
+      let t;
+      if (ac.getOutputTimestamp) {
+        const ts = ac.getOutputTimestamp();
+        if (ts.contextTime > 0 && ts.performanceTime > 0) t = ts.contextTime + (performance.now() - ts.performanceTime) / 1000;
+      }
+      if (t === undefined) t = ac.currentTime - (ac.outputLatency || ac.baseLatency || 0);
+      t = t - start - settings.offset / 1000;
+      lastSong = Math.max(lastSong, t);
+      return lastSong;
+    }
+
+    return {
+      async start() {
+        if (!ac) init();
+        if (ac.state !== 'running') await ac.resume();
+        lastSong = -Infinity;
+        newRun();
+        song = buildSong(); idx = 0;
+        start = ac.currentTime + LEAD_IN;
+        running = true;
+        pump();
+      },
+      halt() { running = false; if (out) out.gain.setTargetAtTime(0, ac.currentTime, 0.05); },
+      songTime,
+      tick() {
+        if (!ac || !out) return;
+        const at = ac.currentTime;
+        const o = ac.createOscillator(); o.frequency.value = 1760;
+        o.connect(decayGain(at, 0.05, 0.001, 0.04)).connect(out); o.start(at); o.stop(at + 0.06);
+      },
+    };
+  })();
+
+  // ===== Modes =====
+  const titleWrap = $('#titleWrap'), resultWrap = $('#resultWrap');
+  const ATTRACT_FROM = 20 * 4 * SPB; // attract mode loops from the chorus
+
+  function enterTitle() {
+    audio.halt();
+    S.mode = 'title';
+    newRun(true, true);
+    S.attractT0 = performance.now() / 1000 - ATTRACT_FROM;
+    titleWrap.hidden = false; resultWrap.hidden = true;
+    areaGoal();
+    $('#startBtn').focus({ preventScroll: true });
+  }
+
+  async function startGame() {
+    titleWrap.hidden = true; resultWrap.hidden = true;
+    S.mode = 'play';
+    newRun(settings.auto, false);
+    areaGoal();
+    try { await audio.start(); } catch (e) { console.error(e); }
+  }
+
+  function showResult() {
+    audio.halt();
+    S.mode = 'result';
+    const sc = currentScore();
+    const rank = sc >= 980000 ? 'S+' : sc >= 950000 ? 'S' : sc >= 900000 ? 'A' : sc >= 800000 ? 'B' : 'C';
+    $('#resRank').textContent = S.auto ? 'AUTO' : rank;
+    $('#resScore').textContent = fmtScore(sc);
+    $('#resPerfect').textContent = S.counts.perfect;
+    $('#resGreat').textContent = S.counts.great;
+    $('#resGood').textContent = S.counts.good;
+    $('#resMiss').textContent = S.counts.miss;
+    $('#resCombo').textContent = `${S.maxCombo} / ${TOTAL_JUDGES}`;
+    resultWrap.hidden = false;
+    areaGoal();
+    $('#againBtn').focus({ preventScroll: true });
+  }
+
+  // ===== Input =====
+  const laneByCode = Object.fromEntries(LANES.map((l, i) => [l.code, i]));
+  window.addEventListener('keydown', (e) => {
+    if (S.mode === 'play') {
+      if (e.code === 'Escape') { enterTitle(); return; }
+      const l = laneByCode[e.code];
+      if (l === undefined || S.auto) return;
+      e.preventDefault();
+      if (e.repeat || S.pressed[l]) return;
+      S.pressed[l] = true;
+      press(l, audio.songTime());
+    } else if (S.mode === 'title' && (e.code === 'Space' || e.code === 'Enter') && !(e.target instanceof HTMLButtonElement)) {
+      e.preventDefault(); startGame();
+    } else if (S.mode === 'result' && e.code === 'Escape') enterTitle();
+  });
+  window.addEventListener('keyup', (e) => {
+    const l = laneByCode[e.code];
+    if (l === undefined || S.mode !== 'play' || S.auto) return;
+    S.pressed[l] = false;
+    release(l, audio.songTime());
+  });
+
+  // Touch: tap the firefly itself (nearest one within reach).
+  const pointerLane = new Map();
+  cv.addEventListener('pointerdown', (e) => {
+    if (S.mode !== 'play' || S.auto) return;
+    e.preventDefault();
+    const now = audio.songTime();
+    let best = -1, bd = Infinity;
+    for (let l = 0; l < 4; l++) { const [x, y] = recPos(l, now); const d = Math.hypot(x - e.clientX, y - e.clientY); if (d < bd) { bd = d; best = l; } }
+    if (bd > recR() * 2.4) return;
+    pointerLane.set(e.pointerId, best);
+    S.pressed[best] = true;
+    press(best, now);
+  });
+  const endPointer = (e) => {
+    const l = pointerLane.get(e.pointerId);
+    if (l === undefined) return;
+    pointerLane.delete(e.pointerId);
+    S.pressed[l] = [...pointerLane.values()].includes(l);
+    if (!S.pressed[l]) release(l, audio.songTime());
+  };
+  cv.addEventListener('pointerup', endPointer);
+  cv.addEventListener('pointercancel', endPointer);
+
+  // Settings UI
+  const speed = $('#speed'), offset = $('#offset'), auto = $('#auto');
+  const syncUi = () => {
+    speed.value = settings.speed; $('#speedOut').textContent = Number(settings.speed).toFixed(1);
+    offset.value = settings.offset; $('#offsetOut').textContent = `${settings.offset > 0 ? '+' : ''}${settings.offset} ms`;
+    auto.checked = !!settings.auto;
+    VIEW = 1.5 / settings.speed;
+  };
+  speed.addEventListener('input', () => { settings.speed = +speed.value; syncUi(); saveSettings(); });
+  offset.addEventListener('input', () => { settings.offset = +offset.value; syncUi(); saveSettings(); });
+  auto.addEventListener('change', () => { settings.auto = auto.checked; saveSettings(); });
+  $('#startBtn').addEventListener('click', startGame);
+  $('#againBtn').addEventListener('click', startGame);
+  $('#backBtn').addEventListener('click', enterTitle);
+
+  // ===== Main loop =====
+  let lastFrame = performance.now();
+  function frame(ts) {
+    const dt = Math.min(0.05, (ts - lastFrame) / 1000);
+    lastFrame = ts;
+    let now;
+    if (S.mode === 'play') {
+      now = audio.songTime();
+      if (!isFinite(now)) now = -LEAD_IN;
+    } else {
+      now = ts / 1000 - S.attractT0;
+      if (now > SONG_END - 1) { newRun(true, true); S.attractT0 = ts / 1000 - ATTRACT_FROM; now = ATTRACT_FROM; }
+    }
+    const ease = Math.min(1, dt * 4);
+    for (const k of ['cx', 'cy', 'u']) A[k] += (AG[k] - A[k]) * ease;
+
+    const beat = now / SPB;
+    const pulse = beat >= 0 && kickBar(Math.floor(beat / 4)) ? Math.exp(-(beat - Math.floor(beat)) * 5) : 0;
+
+    updateJudge(now);
+    drawBackground(now, beat, pulse, dt);
+    drawStreams(now);
+    drawFireflies(now, dt);
+    drawEffects(dt);
+    if (S.mode === 'play') drawHud(now, beat);
+    if (S.mode === 'play' && now > SONG_END) showResult();
+    requestAnimationFrame(frame);
+  }
+
+  window.addEventListener('resize', resize);
+  syncUi();
+  resize();
+  enterTitle();
+  requestAnimationFrame(frame);
+  if (document.fonts && document.fonts.load) document.fonts.load('20px "Dela Gothic One"').catch(() => {});
+  window.__hotaru = { S, CHART, startGame };
+})();
+</script>
+</body>
+</html>
