@@ -291,7 +291,7 @@
     S.popup = null;
     keyDown.clear(); pointerLane.clear(); aimPointers.clear();
     if (M.onNewRun) M.onNewRun();
-    cv.classList.toggle('aiming', M.input === 'aim' && !auto && !attract);
+    cv.classList.toggle('aiming', (M.input === 'aim' || M.hideCursor) && !auto && !attract);
   }
 
   function judge(n, grade, now) {
@@ -346,10 +346,12 @@
       }
       if (n.holding !== null) {
         if (now >= n.end) { n.holding = null; n.tail = 'perfect'; judge(n, 'perfect', now); }
-        else if (M.input === 'aim' && n.holding !== 'auto') {
-          // aim modes: the aim has to stay on the moving hold point
-          const [x, y] = M.followPos(n, now), p = aimOf(n.holding);
-          n.off = Math.hypot(x - p.x, y - p.y) > M.followReach() ? n.off + dt : 0;
+        else if (n.holding !== 'auto' && (M.input === 'aim' || M.holdCheck)) {
+          // aim modes: the aim has to stay on the moving hold point; lane modes may ask for something similar
+          let ok;
+          if (M.input === 'aim') { const [x, y] = M.followPos(n, now), p = aimOf(n.holding); ok = Math.hypot(x - p.x, y - p.y) <= M.followReach(); }
+          else ok = M.holdCheck(n, now);
+          n.off = ok ? 0 : n.off + dt;
           if (n.off > 0.2) { n.holding = null; n.tail = 'miss'; judge(n, 'miss', now); }
         }
       }
@@ -712,7 +714,8 @@
   const syncPressed = (l) => { S.pressed[l] = M.laneCodes[l].some((c) => keyDown.has(c)) || [...pointerLane.values()].includes(l); };
   const aimOf = (token) => aimPointers.get(token) || S.aim;
   const laneToken = (l) => `lane${l}`;
-  const pressLane = (l, now) => press(laneToken(l), now, (n) => n.lane === l);
+  // a mode can add its own condition for lane presses (e.g. a player-moved line must be over the note)
+  const pressLane = (l, now) => press(laneToken(l), now, (n) => n.lane === l && (!M.laneAccept || M.laneAccept(n, now)));
   const pressAim = (token, now) => { const p = aimOf(token); press(token, now, (n) => M.hitTest(n, p.x, p.y)); };
   const playing = () => S.screen === 'play' && !S.auto;
 
@@ -750,6 +753,7 @@
   window.addEventListener('pointermove', (e) => {
     if (e.pointerType === 'mouse') { S.aim.x = e.clientX; S.aim.y = e.clientY; S.touch = false; }
     else if (aimPointers.has(e.pointerId)) aimPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    else if (pointerLane.has(e.pointerId)) { S.aim.x = e.clientX; S.aim.y = e.clientY; }
   });
   cv.addEventListener('pointerdown', (e) => {
     if (!playing()) return;
@@ -762,6 +766,7 @@
       pressAim(e.pointerId, now);
       return;
     }
+    S.aim.x = e.clientX; S.aim.y = e.clientY; S.touch = e.pointerType !== 'mouse';
     const l = M.touchLane(e.clientX, e.clientY, now);
     if (l < 0) return;
     const was = S.pressed[l];
@@ -802,7 +807,8 @@
   // ===== Main loop =====
   let lastFrame = performance.now();
   function frame(ts) {
-    const dt = Math.min(0.05, (ts - lastFrame) / 1000);
+    // frame timestamps can arrive out of order under load; never step backwards
+    const dt = Math.max(0, Math.min(0.05, (ts - lastFrame) / 1000));
     lastFrame = ts;
     let now;
     if (S.screen === 'play') {
@@ -838,7 +844,8 @@
   //  Each defineMode() block is one play style. To add a new one, copy a
   //  block, give it a new id, and fill in: meta (name, keys, text), theme,
   //  bpm / bars / sections / chords / chart, song (arrange, lead voice),
-  //  input (laneCodes + touchLane, or input: 'aim' + hitTest/followPos),
+  //  input (laneCodes + touchLane, optionally laneAccept / holdCheck /
+  //  hideCursor; or input: 'aim' + hitTest/followPos/followReach),
   //  and layout / update / draw / onJudge / onNewRun.
   // =====================================================================
 
@@ -3622,6 +3629,425 @@
         if (grade === 'perfect' && !kit.reduceMotion) shake = Math.max(shake, 2.5);
       },
       onNewRun() { particles.length = 0; cuts.length = 0; shake = 0; },
+    };
+  });
+
+  // ---------------------------------------------------------------------
+  //  TOMOSHI: a judgement line you move yourself. Lanterns hang still in
+  //  four rows; you sweep a beam of light across with the mouse (or your
+  //  finger) and light each lantern by pressing its row's key while the
+  //  beam is on it. The chart is fixed; how you sweep is up to you.
+  // ---------------------------------------------------------------------
+  defineMode((kit) => {
+    const { g, rgba, hex, S, TAU } = kit;
+    const BPM = 118, SPB = 60 / BPM;
+    const theme = { ink: '#070b1f', ink2: '#1d1433', panel: 'rgba(7, 11, 31, 0.84)', paper: '#fbf3e4', muted: '#b0a6c4', accent: '#ffb43d' };
+    const INK = hex(theme.ink), INK2 = hex(theme.ink2), PAPER = hex(theme.paper), MUTED = hex(theme.muted), WARM = hex('#ffd9a0');
+    // Rows from the top down.
+    const ROWS = [
+      { label: 'D', name: '上段・朱', color: '#ff6b4a' },
+      { label: 'F', name: '山吹', color: '#ffb43d' },
+      { label: 'J', name: '桃', color: '#ff8fb8' },
+      { label: 'K', name: '下段・若竹', color: '#8fe08a' },
+    ].map((r) => ({ ...r, rgb: hex(r.color) }));
+    const SECTIONS = [
+      { bar: 0, name: 'INTRO' }, { bar: 4, name: 'VERSE' }, { bar: 12, name: 'BUILD' }, { bar: 20, name: 'CHORUS' },
+      { bar: 28, name: 'BREAK' }, { bar: 32, name: 'CHORUS II' }, { bar: 40, name: 'OUTRO' },
+    ];
+    const BARS = [
+      '0...1...2...3...', '3...2...1...0...', '0...2...1...3...', 'a-------2...3...',
+      '0...1.2.3...2.1.', '0...3...1...2...', '0.1...2.3...2...', 'b-------0...3...',
+      '3...2.1.0...1.2.', '3...0...2...1...', '3.2...1.0...1...', 'c-------3.2.1.0.',
+      '0.1.2.3.0.1.2.3.', '3.2.1.0.3.2.1.0.', ['0...1...2...3...', '2...3...0...1...'], '0.2.1.3.0.2.1.3.',
+      '0.1.0.1.2.3.2.3.', ['0...0...3...3...', '..1...1...2...2.'], '0.1.2.3.3.2.1.0.', '0.1.2.3.01230123',
+      ['0...2...0...2...', '..1...3...1...3.'], 'a-------1.2.3.2.', ['3...1...3...1...', '..2...0...2...0.'], 'd-------0.1.0123',
+      '0.1.2.3.0.1.2.3.', ['0...1...2...3...', '3...2...1...0...'], ['b-------........', '....0.3.0.3.2.3.'], '0123..3210..0.3.',
+      'a-------c-------', 'b-------d-------', ['a---------------', '........c-------'], 'd-------0.1.2.3.',
+      '0.2.1.3.0.2.1.3.', ['0...1...2...3...', '2...3...0...1...'], '0.1.2.3.01233210', 'c-------1.0.1.0.',
+      ['0...2...0...2...', '..1...3...1...3.'], '3.2.1.0.3.2.1.0.', ['0.0.....3.3.....', '....1.2.....2.1.'], ['0.1.2.3.0.1.2.3.', '........3.....0.'],
+      ['0...............', '3...............'], '1...2...1...2...', ['a---------------', 'd---------------'], '................',
+    ];
+    // E - C#m - A - B. Lead pitch per row: high at the top.
+    const CHORDS = [
+      { pad: [52, 56, 59], bass: 40, lead: [76, 71, 68, 64] },
+      { pad: [52, 56, 61], bass: 37, lead: [76, 73, 68, 64] },
+      { pad: [52, 57, 61], bass: 45, lead: [76, 73, 69, 64] },
+      { pad: [54, 59, 63], bass: 47, lead: [78, 75, 71, 66] },
+    ];
+
+    // Where the lanterns hang across the field (0 = left, 1 = right) follows a sweep for each
+    // section, so there is always a natural way to move the beam; how closely you follow it is yours.
+    const tri = (b, p) => { const u = (((b / p) % 1) + 1) % 1; return u < 0.5 ? u * 2 : 2 - u * 2; };
+    const PATHS = [
+      (b) => 0.1 + 0.8 * tri(b, 8), // INTRO: one slow sweep per two bars
+      (b) => 0.1 + 0.8 * tri(b, 4), // VERSE: across and back every bar
+      (b) => (b < 64 ? 0.2 + 0.6 * tri(b, 4) : 0.25 + 0.5 * tri(b, 2)), // BUILD: narrower and quicker
+      (b) => 0.08 + 0.84 * tri(b, 4), // CHORUS: the full width
+      (b) => 0.5 + 0.38 * Math.sin((TAU * b) / 16), // BREAK: a slow swing for the long holds
+      (b) => 0.5 + 0.18 * Math.sin((TAU * b) / 32) + 0.28 * (tri(b, 2) * 2 - 1), // CHORUS II: quick sweeps that drift
+      (b) => 0.1 + 0.8 * tri(b, 8), // OUTRO
+    ];
+    function pathX(beat) {
+      const i = kit.secIndex(SECTIONS, Math.floor(beat / 4));
+      const x = PATHS[i](beat);
+      if (i === 0) return x;
+      const k = (beat - SECTIONS[i].bar * 4) / 2;
+      if (k >= 1) return x;
+      const prev = PATHS[i - 1](beat), e = 0.5 - 0.5 * Math.cos(Math.PI * Math.max(0, k));
+      return prev + (x - prev) * e;
+    }
+    const CHART = kit.parseLanes(BARS, SPB, 4);
+    for (const n of CHART) {
+      n.x = pathX(n.beat);
+      n.x2 = n.dur > 0 ? pathX(n.beat + n.beats) : n.x;
+    }
+    kit.sortChart(CHART);
+    for (let i = 1; i < CHART.length; i++) {
+      const a = CHART[i - 1], b = CHART[i], dt = b.t - (a.t + a.dur);
+      if (dt > 0 && Math.abs(b.x - a.x2) / dt > 2.2) console.warn(`tomoshi: beat ${b.beat}: the beam would have to move too fast`);
+    }
+    const kickBar = (bar) => { const n = SECTIONS[kit.secIndex(SECTIONS, bar)].name; return (n !== 'INTRO' && n !== 'BREAK') || bar === 31; };
+
+    // ----- layout -----
+    let W = 0, H = 0, VIEW = 1.6;
+    const R = { x: 0, y: 0, w: 1, h: 1 }, RG = { x: 0, y: 0, w: 1, h: 1 };
+    const rowGap = () => R.h / 4;
+    const lw = () => Math.max(20, Math.min(rowGap() * 0.34, R.w * 0.075));
+    const tol = () => lw() * 0.6 + R.w * 0.035;
+    const fx = (nx) => R.x + nx * R.w;
+    // lanterns hang on wires that sag a little in the middle
+    const rowY = (row, nx) => R.y + rowGap() * (row + 0.42) + rowGap() * 0.12 * Math.sin(Math.PI * Math.min(1, Math.max(0, nx)));
+    const holdX = (n, t) => n.x + (n.x2 - n.x) * Math.min(1, Math.max(0, (t - n.t) / n.dur));
+    const auto = { x: 0 };
+    const beamX = () => (S.auto ? auto.x : Math.min(R.x + R.w, Math.max(R.x, S.aim.x)));
+
+    // ----- effects -----
+    const sparks = [];
+    function burst(x, y, col, power) {
+      const n = kit.reduceMotion ? 4 : Math.round(16 * power);
+      for (let i = 0; i < n; i++) {
+        const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.4, v = (60 + Math.random() * 200) * power;
+        sparks.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 0, max: 0.5 + Math.random() * 0.6, col, size: 1.2 + Math.random() * 2 });
+      }
+    }
+    function drawSparks(dt) {
+      g.globalCompositeOperation = 'lighter';
+      for (let i = sparks.length - 1; i >= 0; i--) {
+        const p = sparks[i]; p.life += dt;
+        if (p.life > p.max) { sparks.splice(i, 1); continue; }
+        p.vx *= 1 - dt * 1.5; p.vy = p.vy * (1 - dt * 1.5) - 20 * dt;
+        p.x += p.vx * dt; p.y += p.vy * dt;
+        g.fillStyle = rgba(p.col, 1 - p.life / p.max);
+        g.beginPath(); g.arc(p.x, p.y, p.size, 0, TAU); g.fill();
+      }
+      g.globalCompositeOperation = 'source-over';
+    }
+
+    // ----- drawing -----
+    const stars = Array.from({ length: kit.reduceMotion ? 0 : 90 }, () => ({ x: Math.random(), y: Math.random() * 0.7, r: 0.6 + Math.random() * 1.2, ph: Math.random() * TAU }));
+    function drawBackground(now, pulse) {
+      const bg = g.createLinearGradient(0, 0, 0, H);
+      bg.addColorStop(0, rgba(INK, 1)); bg.addColorStop(1, rgba(INK2, 1));
+      g.fillStyle = bg; g.fillRect(0, 0, W, H);
+      for (const s of stars) {
+        g.fillStyle = rgba(PAPER, 0.25 + 0.25 * Math.sin(now * 1.7 + s.ph));
+        g.beginPath(); g.arc(s.x * W, s.y * H, s.r, 0, TAU); g.fill();
+      }
+      // warm haze along the bottom, breathing with the kick
+      const haze = g.createLinearGradient(0, H * 0.6, 0, H);
+      haze.addColorStop(0, rgba(WARM, 0)); haze.addColorStop(1, rgba(WARM, 0.07 + 0.05 * pulse));
+      g.fillStyle = haze; g.fillRect(0, H * 0.6, W, H * 0.4);
+      // distant hills
+      g.fillStyle = rgba(INK, 0.85);
+      g.beginPath(); g.moveTo(0, H);
+      for (let x = 0; x <= W; x += 20) g.lineTo(x, H - 30 - 18 * Math.sin(x * 0.006 + 1) - 10 * Math.sin(x * 0.017));
+      g.lineTo(W, H); g.closePath(); g.fill();
+    }
+    function drawWires(now) {
+      for (let r = 0; r < 4; r++) {
+        g.strokeStyle = rgba(PAPER, 0.14); g.lineWidth = 1;
+        g.beginPath();
+        for (let k = 0; k <= 32; k++) { const nx = k / 32; const x = fx(nx), y = rowY(r, nx) - lw() * 0.75; if (k === 0) g.moveTo(x, y); else g.lineTo(x, y); }
+        g.stroke();
+        // row key on the left
+        const col = ROWS[r].rgb, down = S.pressed[r] || S.autoHold[r] > now;
+        const x = R.x - 28, y = rowY(r, 0);
+        g.fillStyle = down ? rgba(col, 0.6) : rgba(INK, 0.7);
+        g.beginPath(); g.arc(x, y, 15, 0, TAU); g.fill();
+        g.strokeStyle = rgba(col, 1); g.lineWidth = 2; g.stroke();
+        g.fillStyle = rgba(PAPER, 0.95);
+        g.font = '15px "Dela Gothic One", sans-serif';
+        g.textAlign = 'center'; g.textBaseline = 'middle';
+        g.fillText(ROWS[r].label, x, y + 1);
+      }
+    }
+    // a paper lantern: `fill` is how far its light has risen inside (0..1), `lit` makes it glow fully
+    function lantern(x, y, col, fill, lit, alpha) {
+      const w = lw(), h = w * 1.35;
+      g.save();
+      g.globalAlpha = alpha;
+      if (lit > 0 || fill > 0.5) {
+        const glow = g.createRadialGradient(x, y, 0, x, y, w * 2.2);
+        glow.addColorStop(0, rgba(col, 0.45 * Math.max(lit, (fill - 0.5) * 0.8))); glow.addColorStop(1, rgba(col, 0));
+        g.globalCompositeOperation = 'lighter';
+        g.fillStyle = glow; g.beginPath(); g.arc(x, y, w * 2.2, 0, TAU); g.fill();
+        g.globalCompositeOperation = 'source-over';
+      }
+      kit.roundRect(x - w / 2, y - h / 2, w, h, w * 0.42);
+      g.fillStyle = rgba(INK, 0.85); g.fill();
+      // the light rising inside
+      g.save();
+      kit.roundRect(x - w / 2, y - h / 2, w, h, w * 0.42); g.clip();
+      const lh = h * (lit > 0 ? 1 : fill);
+      g.fillStyle = rgba(lit > 0 ? WARM : col, lit > 0 ? 0.95 : 0.35 + 0.4 * fill);
+      g.fillRect(x - w / 2, y + h / 2 - lh, w, lh);
+      g.restore();
+      kit.roundRect(x - w / 2, y - h / 2, w, h, w * 0.42);
+      g.strokeStyle = rgba(col, 1); g.lineWidth = 2; g.stroke();
+      // ribs and caps
+      g.strokeStyle = rgba(col, 0.45); g.lineWidth = 1;
+      for (const k of [-0.2, 0.2]) { g.beginPath(); g.moveTo(x - w / 2 + 2, y + h * k); g.lineTo(x + w / 2 - 2, y + h * k); g.stroke(); }
+      g.fillStyle = rgba(col, 1);
+      g.fillRect(x - w * 0.28, y - h / 2 - 3, w * 0.56, 4);
+      g.fillRect(x - w * 0.28, y + h / 2 - 1, w * 0.56, 4);
+      g.restore();
+    }
+    function drawLanterns(now) {
+      const w = lw();
+      // the path through the next few lanterns, so you can see where the beam wants to go
+      const next = [];
+      for (let i = S.cursor; i < S.notes.length && next.length < 8; i++) {
+        const n = S.notes[i];
+        if (n.t - now > VIEW) break;
+        if (!n.head) next.push(n);
+      }
+      if (next.length > 1) {
+        g.setLineDash([2, 6]);
+        g.strokeStyle = rgba(PAPER, 0.22); g.lineWidth = 1.2;
+        g.beginPath();
+        next.forEach((n, i) => { const x = fx(n.x), y = rowY(n.lane, n.x); if (i === 0) g.moveTo(x, y); else g.lineTo(x, y); });
+        g.stroke(); g.setLineDash([]);
+      }
+      for (let i = S.notes.length - 1; i >= 0; i--) {
+        const n = S.notes[i];
+        const col = ROWS[n.lane].rgb;
+        if (n.t - now > VIEW) continue;
+        const age = now - n.t;
+        // hold: a garland of small lights the beam lights up as it sweeps along
+        if (n.dur > 0 && age < n.dur + 1) {
+          const done = n.tail === 'perfect', holding = kit.holding(n);
+          const k = holding ? Math.min(1, (now - n.t) / n.dur) : done ? 1 : 0;
+          const x0 = fx(n.x), x1 = fx(n.x2);
+          const count = Math.max(3, Math.round(Math.abs(x1 - x0) / 18));
+          const fade = done ? Math.max(0, 1 - (now - n.end) / 0.8) : n.tail === 'miss' ? Math.max(0, 1 - (now - n.end) / 0.4) : 1;
+          for (let j = 0; j <= count; j++) {
+            const u = j / count, nx = n.x + (n.x2 - n.x) * u;
+            const x = fx(nx), y = rowY(n.lane, nx) - w * 0.1;
+            const on = u <= k && n.head !== 'miss';
+            g.globalAlpha = fade * Math.min(1, (VIEW - (n.t - now)) / 0.3);
+            if (on) {
+              g.globalCompositeOperation = 'lighter';
+              g.fillStyle = rgba(col, 0.35); g.beginPath(); g.arc(x, y, 9, 0, TAU); g.fill();
+              g.globalCompositeOperation = 'source-over';
+            }
+            g.fillStyle = on ? rgba(WARM, 1) : rgba(col, 0.45);
+            g.beginPath(); g.arc(x, y, on ? 4 : 3, 0, TAU); g.fill();
+          }
+          g.globalAlpha = 1;
+          if (holding) {
+            const hx = fx(holdX(n, now)), hy = rowY(n.lane, holdX(n, now));
+            g.strokeStyle = rgba(WARM, 0.9); g.lineWidth = 2;
+            g.beginPath(); g.arc(hx, hy, w * 0.7, 0, TAU); g.stroke();
+          }
+        }
+        if (!n.head) {
+          // waiting: its light rises as its moment nears; the outline tightens over the last stretch
+          const k = Math.max(0, Math.min(1, 1 - (n.t - now) / VIEW));
+          const x = fx(n.x), y = rowY(n.lane, n.x);
+          lantern(x, y, col, k, 0, Math.min(1, (VIEW - (n.t - now)) / 0.3));
+          const c = (n.t - now) / (VIEW * 0.5);
+          if (c < 1) {
+            g.strokeStyle = rgba(col, 0.25 + 0.6 * (1 - c)); g.lineWidth = 1.5;
+            kit.roundRect(x - w / 2 - 6 - 14 * c, y - w * 0.675 - 6 - 14 * c, w + 12 + 28 * c, w * 1.35 + 12 + 28 * c, w * 0.5);
+            g.stroke();
+          }
+        } else if (n.head !== 'miss' && age < 1.4) {
+          // lit: it drifts up into the night
+          const x = fx(n.x), y = rowY(n.lane, n.x) - age * age * 60;
+          lantern(x, y, col, 1, 1, Math.max(0, 1 - age / 1.4));
+        } else if (n.head === 'miss' && age < 0.6) {
+          const x = fx(n.x), y = rowY(n.lane, n.x) + age * 30;
+          lantern(x, y, MUTED, 0, 0, Math.max(0, 0.7 - age));
+        }
+      }
+    }
+    function drawBeam(now) {
+      const x = beamX(), top = R.y - 10, bottom = R.y + R.h + 26;
+      const soft = g.createLinearGradient(x - 40, 0, x + 40, 0);
+      soft.addColorStop(0, rgba(WARM, 0)); soft.addColorStop(0.5, rgba(WARM, 0.16)); soft.addColorStop(1, rgba(WARM, 0));
+      g.globalCompositeOperation = 'lighter';
+      g.fillStyle = soft; g.fillRect(x - 40, top, 80, bottom - top);
+      g.globalCompositeOperation = 'source-over';
+      g.strokeStyle = rgba(WARM, 0.95); g.lineWidth = 3;
+      g.beginPath(); g.moveTo(x, top); g.lineTo(x, bottom); g.stroke();
+      g.strokeStyle = rgba(PAPER, 0.9); g.lineWidth = 1;
+      g.stroke();
+      // where the beam crosses each row; it flares while the row's key is down
+      for (let r = 0; r < 4; r++) {
+        const nx = (x - R.x) / R.w, y = rowY(r, nx), col = ROWS[r].rgb;
+        const down = S.pressed[r] || S.autoHold[r] > now;
+        if (down || S.flash[r] > 0) {
+          const rad = lw() * (1.1 + 0.6 * S.flash[r]);
+          const flare = g.createRadialGradient(x, y, 0, x, y, rad);
+          flare.addColorStop(0, rgba(col, 0.55 + 0.35 * S.flash[r])); flare.addColorStop(1, rgba(col, 0));
+          g.globalCompositeOperation = 'lighter';
+          g.fillStyle = flare;
+          g.beginPath(); g.arc(x, y, rad, 0, TAU); g.fill();
+          g.globalCompositeOperation = 'source-over';
+        }
+        g.strokeStyle = rgba(col, 0.9); g.lineWidth = 2;
+        g.beginPath(); g.moveTo(x - 7, y); g.lineTo(x + 7, y); g.stroke();
+      }
+      // the lamp at the foot of the beam
+      g.fillStyle = rgba(hex(theme.accent), 1);
+      g.beginPath(); g.moveTo(x - 16, bottom + 14); g.lineTo(x - 8, bottom); g.lineTo(x + 8, bottom); g.lineTo(x + 16, bottom + 14); g.closePath(); g.fill();
+    }
+    const GRADE_COLOR = { perfect: PAPER, great: ROWS[1].rgb, good: ROWS[3].rgb, miss: MUTED };
+    let popups = [];
+    function drawPopups(now) {
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.font = '14px "Dela Gothic One", sans-serif';
+      popups = popups.filter((p) => now - p.t < 0.5);
+      for (const p of popups) {
+        const age = now - p.t;
+        g.globalAlpha = Math.min(1, (0.5 - age) * 5);
+        g.fillStyle = rgba(GRADE_COLOR[p.grade], 1);
+        g.fillText(p.grade.toUpperCase(), p.x, p.y - lw() * 1.3 - age * 24);
+      }
+      g.globalAlpha = 1;
+    }
+
+    return {
+      id: 'tomoshi', name: 'TOMOSHI', kind: '自分で動かす判定線', kana: '灯し ・ 自分で動かす判定線',
+      blurb: '提灯は動かない。判定線（光の柱）を自分で動かし、提灯に重ねた瞬間にその段のキーで灯す。',
+      lede: '提灯は夜空に吊られたまま動きません。<strong>判定線（光の柱）を自分で動かし</strong>、提灯に重ねて、その提灯の灯りが満ちた瞬間に、提灯の段のキーを押します。点線はおすすめの動かし方です。',
+      keys: ROWS.map((r) => ({ label: r.label, name: r.name, color: r.color })),
+      how: [
+        ['パソコン', 'マウスで光の柱を左右に動かし、段のキー <kbd>D</kbd> <kbd>F</kbd> <kbd>J</kbd> <kbd>K</kbd> を押す（提灯をクリックしても灯せます）'],
+        ['スマホ', '提灯を直接タップ'],
+        ['長押し', '押したまま、灯りの列に沿って光の柱を動かす'],
+      ],
+      touchHint: '光の柱はマウスか指で動かします',
+      meta: 'BPM 118 ・ 44小節 ・ 約1分30秒 ・ 譜面は決まっていますが、どう動かすかは自由です。',
+      theme, attractFromBar: 20, hideCursor: true,
+      bpm: BPM, bars: 44, sections: SECTIONS, chords: CHORDS, chart: CHART,
+      laneCodes: [['KeyD'], ['KeyF'], ['KeyJ'], ['KeyK']],
+      // a press only counts while the beam is over the lantern
+      laneAccept: (n) => Math.abs(beamX() - fx(n.x)) <= tol(),
+      holdCheck: (n, now) => Math.abs(beamX() - fx(holdX(n, now))) <= tol() * 1.3,
+      // a tap or click picks the row it lands in; the beam jumps to it first (the engine moves the aim)
+      touchLane(x, y) {
+        if (y < R.y - rowGap() * 0.3 || y > R.y + R.h + rowGap() * 0.3) return -1;
+        return Math.max(0, Math.min(3, Math.floor((y - R.y) / rowGap())));
+      },
+      song: {
+        bass: { wave: 'triangle', subShift: 0, sub: 0.8, q: 4, open: 900, close: 200 },
+        pad: { wave: 'sawtooth', cutoff: 1100, level: 0.045, detune: 9, attack: 0.45 },
+        delay: { beats: 0.75, feedback: 0.3, mix: 0.24 }, leadLevel: 0.55, leadSend: 0.45, padBus: 0.85,
+        leadMidi: (n) => CHORDS[Math.floor(n.beat / 4) % 4].lead[n.lane],
+        // Music-box chime: a sine with a bright octave and a glassy partial that fade quickly.
+        lead(A, at, midi, dur) {
+          const { ac } = A, f0 = A.mtof(midi);
+          const gn = ac.createGain();
+          gn.gain.setValueAtTime(0.0001, at); gn.gain.exponentialRampToValueAtTime(0.28, at + 0.002);
+          if (dur < 0.3) gn.gain.exponentialRampToValueAtTime(0.0001, at + 0.8);
+          else { gn.gain.exponentialRampToValueAtTime(0.1, at + 0.25); gn.gain.setValueAtTime(0.1, at + dur); gn.gain.exponentialRampToValueAtTime(0.0001, at + dur + 0.5); }
+          gn.connect(A.bus.lead);
+          const end = at + Math.max(0.85, dur + 0.55);
+          const o1 = ac.createOscillator(); o1.type = 'sine'; o1.frequency.value = f0;
+          const o2 = ac.createOscillator(); o2.type = 'sine'; o2.frequency.value = f0 * 2;
+          const g2 = A.decayGain(at, 0.35, 0.001, 0.25);
+          const o3 = ac.createOscillator(); o3.type = 'sine'; o3.frequency.value = f0 * 5.4;
+          const g3 = A.decayGain(at, 0.12, 0.001, 0.06);
+          o1.connect(gn); o2.connect(g2).connect(gn); o3.connect(g3).connect(gn);
+          for (const o of [o1, o2, o3]) { o.start(at); o.stop(end); }
+        },
+        arrange(add, bar, b0, ch, name) {
+          if (name === 'INTRO') {
+            if (bar >= 2) for (let i = 0; i < 8; i++) add(b0 + i / 2, 'shaker');
+          } else if (name === 'VERSE') {
+            add(b0, 'kick'); add(b0 + 2, 'kick');
+            for (let i = 0; i < 8; i++) add(b0 + i / 2, 'shaker');
+            add(b0 + 1, 'rim'); add(b0 + 3, 'rim');
+            add(b0, 'bass', ch.bass, SPB * 1.4); add(b0 + 2, 'bass', ch.bass, SPB * 1.4);
+          } else if (name === 'BUILD') {
+            for (let i = 0; i < 4; i++) { add(b0 + i, 'kick'); add(b0 + i + 0.5, 'bass', ch.bass, SPB * 0.45); }
+            for (let i = 0; i < 8; i++) add(b0 + i / 2, 'hat', false);
+            if (bar === 19) for (let i = 8; i < 16; i++) add(b0 + i / 4, 'snare');
+            else { add(b0 + 1, 'snare'); add(b0 + 3, 'snare'); }
+          } else if (name === 'CHORUS' || name === 'CHORUS II') {
+            if (bar % 4 === 0) add(b0, 'crash');
+            for (let i = 0; i < 4; i++) {
+              add(b0 + i, 'kick');
+              add(b0 + i, 'bass', ch.bass, SPB * 0.45); add(b0 + i + 0.5, 'bass', ch.bass + 12, SPB * 0.45);
+              add(b0 + i + 0.5, 'hat', true);
+              add(b0 + i + 0.25, 'shaker'); add(b0 + i + 0.75, 'shaker');
+            }
+            add(b0 + 1, 'snare'); add(b0 + 3, 'snare');
+          } else if (name === 'BREAK') {
+            add(b0, 'bass', ch.bass, SPB * 3.5);
+            for (let i = 0; i < 4; i++) add(b0 + i + 0.5, 'shaker');
+            if (bar === 31) { for (let i = 0; i < 4; i++) add(b0 + i, 'kick'); for (let i = 8; i < 16; i++) add(b0 + i / 4, 'snare'); }
+          } else if (name === 'OUTRO') {
+            if (bar === 40) add(b0, 'crash');
+            if (bar <= 41) { add(b0, 'kick'); add(b0 + 2, 'kick'); }
+            if (bar === 42) add(b0, 'bass', ch.bass, SPB * 4);
+          }
+        },
+      },
+      layout(w, h, snap) {
+        W = w; H = h;
+        const top = Math.max(84, H * 0.11), bottom = Math.max(80, H * 0.11);
+        let x0 = 60;
+        const x1 = W - 28;
+        if (kit.wide()) x0 = Math.max(W * 0.42, 560) + 30;
+        RG.x = x0; RG.w = Math.max(100, x1 - x0); RG.y = top; RG.h = Math.max(160, H - top - bottom);
+        if (snap) Object.assign(R, RG);
+      },
+      update(now, dt) {
+        VIEW = kit.view(1.6);
+        const k = Math.min(1, dt * 4);
+        for (const key of ['x', 'y', 'w', 'h']) R[key] += (RG[key] - R[key]) * k;
+        // autoplay steers the beam toward the next lantern, or along the hold it is lighting
+        if (S.auto) {
+          let target = null;
+          for (let i = S.cursor; i < S.notes.length; i++) {
+            const n = S.notes[i];
+            if (kit.holding(n)) { target = holdX(n, now); break; }
+            if (!n.head) { target = n.x; break; }
+          }
+          if (target !== null) auto.x += (fx(target) - auto.x) * Math.min(1, dt * 10);
+        }
+      },
+      draw(now, dt) {
+        const beat = now / SPB;
+        drawBackground(now, kit.pulse(beat, kickBar(Math.floor(beat / 4))));
+        drawWires(now);
+        drawLanterns(now);
+        drawBeam(now);
+        drawSparks(dt);
+        if (kit.playing()) drawPopups(now);
+      },
+      onJudge(n, grade, now) {
+        const nx = n.dur > 0 && n.tail ? n.x2 : n.x;
+        const x = fx(nx), y = rowY(n.lane, nx);
+        popups.push({ grade, t: now, x, y });
+        if (popups.length > 6) popups.shift();
+        if (grade === 'miss') return;
+        burst(x, y, ROWS[n.lane].rgb, grade === 'perfect' ? 1 : 0.6);
+        S.flash[n.lane] = 1;
+      },
+      onNewRun() { sparks.length = 0; popups = []; auto.x = R.x + R.w / 2; },
     };
   });
 

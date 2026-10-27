@@ -17,6 +17,7 @@
 - `minamo` MINAMO（広がる円）：広がる波紋が、待っているノーツに届く瞬間に狙って叩く。マウス + Z / X、またはタップ
 - `furiko` FURIKO（振り子判定線）：メトロノームの振り子が帯の上のノーツを通過する瞬間。D F J K
 - `hasami` HASAMI（閉じる 2 本線）：両側から近づく 2 本の線が重なる瞬間。D F J K
+- `tomoshi` TOMOSHI（自分で動かす判定線）：動かない提灯に、自分で動かす光の柱を重ねて灯す。マウスで柱を動かし、段のキー D F J K（スマホは提灯をタップ）
 
 ## ファイルの中身
 
@@ -36,7 +37,7 @@
 - **曲と譜面**：`bpm`、`bars`、`sections`（`{ bar, name }`）、`chords`（`{ pad, bass, lead }`）、`chart`（ノーツの配列。最低限 `beat` `t` `dur` と、キー入力なら `lane`）、`attractFromBar`（タイトル画面のデモを始める小節）。
   - レーン型の譜面は `kit.parseLanes(BARS, SPB, レーン数)` で、1 小節 16 文字の文字列から作れます（`0`〜`5` がタップ、`a`〜`f` と `-` が長押し）。作ったら `kit.sortChart(chart)`。
 - **音**：`song.arrange(add, bar, b0, ch, name)` でドラムやベースを並べ、`song.lead(A, at, midi, dur)` でリードの音色、`song.leadMidi(note)` でノーツごとの音程を決めます。`song.bass` `song.pad` `song.delay` で共通の音色を調整できます。
-- **入力**：キーで叩く形式は `laneCodes`（レーンごとのキーコード配列）と `touchLane(x, y, now)`。位置を狙う形式は `input: 'aim'` と `hitTest(note, x, y)`・`followPos(note, now)`・`followReach()`。
+- **入力**：キーで叩く形式は `laneCodes`（レーンごとのキーコード配列）と `touchLane(x, y, now)`。押したときに追加の条件を付けたいときは `laneAccept(note, now)`、長押し中の条件は `holdCheck(note, now)`、マウスカーソルを隠すなら `hideCursor: true`（マウスや指の位置は `kit.S.aim`）。位置を狙う形式は `input: 'aim'` と `hitTest(note, x, y)`・`followPos(note, now)`・`followReach()`。
 - **描画**：`layout(W, H, snap)`、`update(now, dt)`、`draw(now, dt)`、`onJudge(note, grade, now)`、`onNewRun()`。画面左のパネルを避けたいときは `kit.wide()` を見ます。スコアと進行バーはエンジンが描きます。コンボを自分で描く形式は `comboOwn: true`。
 
 `kit` には描画コンテキスト `g`、実行中の状態 `S`（`notes` `pressed` `autoHold` `flash` `combo` `popup` など）、`rgba` `hex` `mulberry32` `secIndex` `pulse` `view` `holding` `runOf` などの道具が入っています。
