@@ -3,24 +3,24 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Hotaru Dance</title>
+<title>Hasami Lines</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=Zen+Kaku+Gothic+New:wght@400;700&display=swap">
 <style>
   :root {
-    /* Layout: full-bleed night canvas where four firefly receptors dance in the free area; HTML panels float over it for title and results */
-    --ink: #060d0b;
-    --ink-2: #0f2019;
-    --panel: rgba(6, 13, 11, 0.84);
-    --paper: #eef6ee;
-    --muted: #98ad9f;
-    --line: rgba(238, 246, 238, 0.16);
-    --r0: #a6f05a; /* 若葉 D */
-    --r1: #ffc84a; /* 山吹 F */
-    --r2: #5ad8ff; /* 空   J */
-    --r3: #ff7ab0; /* 撫子 K */
+    /* Layout: full-bleed charcoal canvas split into four zones; pairs of blades close inside each zone; HTML panels float over it for title and results */
+    --ink: #0b0b0e;
+    --ink-2: #19181f;
+    --panel: rgba(11, 11, 14, 0.86);
+    --paper: #f4f2ee;
+    --muted: #a7a3ad;
+    --line: rgba(244, 242, 238, 0.16);
+    --z0: #ff4f6e; /* 紅   D */
+    --z1: #ffc94d; /* 金   F */
+    --z2: #3ee0a0; /* 翠   J */
+    --z3: #4f8dff; /* 瑠璃 K */
     --font-display: "Dela Gothic One", "Zen Kaku Gothic New", "Hiragino Sans", sans-serif;
     --font-body: "Zen Kaku Gothic New", "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
     color-scheme: dark;
@@ -44,13 +44,13 @@
   }
   .brand { display: grid; gap: 4px; }
   h1 { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: 2.7rem; line-height: 1; letter-spacing: 0.06em; }
-  h1 span:nth-child(4n+1) { color: var(--r0); }
-  h1 span:nth-child(4n+2) { color: var(--r1); }
-  h1 span:nth-child(4n+3) { color: var(--r2); }
-  h1 span:nth-child(4n+4) { color: var(--r3); }
+  h1 span:nth-child(4n+1) { color: var(--z0); }
+  h1 span:nth-child(4n+2) { color: var(--z1); }
+  h1 span:nth-child(4n+3) { color: var(--z2); }
+  h1 span:nth-child(4n+4) { color: var(--z3); }
   .sub { margin: 0; color: var(--muted); font-size: 0.86rem; letter-spacing: 0.08em; }
   .lede { margin: 0; line-height: 1.75; font-size: 0.95rem; }
-  .lede strong { color: var(--r1); font-weight: 700; }
+  .lede strong { color: var(--z1); font-weight: 700; }
 
   .keys { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
   .keys li { display: grid; justify-items: center; gap: 4px; padding: 8px 0 6px; border-radius: 10px; border: 1.5px solid var(--c); background: color-mix(in srgb, var(--c) 14%, transparent); }
@@ -61,9 +61,9 @@
   .row { display: grid; grid-template-columns: 8.5em 1fr 4.2em; align-items: center; gap: 10px; font-size: 0.86rem; }
   .row output { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
   .row small { grid-column: 2 / 4; color: var(--muted); font-size: 0.74rem; margin-top: -6px; }
-  input[type=range] { width: 100%; accent-color: var(--r0); }
+  input[type=range] { width: 100%; accent-color: var(--z1); }
   .check { display: flex; align-items: center; gap: 8px; font-size: 0.86rem; cursor: pointer; }
-  .check input { accent-color: var(--r0); width: 16px; height: 16px; }
+  .check input { accent-color: var(--z1); width: 16px; height: 16px; }
 
   .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
   button {
@@ -72,13 +72,13 @@
   }
   button.primary { background: var(--paper); color: var(--ink); border-color: var(--paper); }
   button:hover { border-color: var(--paper); }
-  button:focus-visible, input:focus-visible { outline: 2px solid var(--r1); outline-offset: 2px; }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--z1); outline-offset: 2px; }
   .hint { color: var(--muted); font-size: 0.76rem; }
   .meta { margin: 0; color: var(--muted); font-size: 0.74rem; border-top: 1px solid var(--line); padding-top: 12px; }
 
   .eyebrow { margin: 0; font-size: 0.74rem; letter-spacing: 0.24em; color: var(--muted); }
   .result-head { display: flex; align-items: baseline; gap: 16px; }
-  .rank { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: 4rem; line-height: 1; color: var(--r1); }
+  .rank { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: 4rem; line-height: 1; color: var(--z1); }
   .score { font-family: var(--font-display); font-size: 2rem; font-variant-numeric: tabular-nums; }
   .stats { margin: 0; display: grid; grid-template-columns: 1fr auto; gap: 6px 16px; font-size: 0.9rem; }
   .stats dt { color: var(--muted); letter-spacing: 0.08em; }
@@ -98,15 +98,15 @@
 <div class="panel-wrap" id="titleWrap">
   <section class="panel" aria-labelledby="gameTitle">
     <div class="brand">
-      <h1 id="gameTitle" aria-label="HOTARU"><span>H</span><span>O</span><span>T</span><span>A</span><span>R</span><span>U</span></h1>
-      <p class="sub">蛍の舞 ・ 踊るレセプターのプロトタイプ</p>
+      <h1 id="gameTitle" aria-label="HASAMI"><span>H</span><span>A</span><span>S</span><span>A</span><span>M</span><span>I</span></h1>
+      <p class="sub">挟み ・ 閉じる2本線のプロトタイプ</p>
     </div>
-    <p class="lede">4匹の蛍（受け皿）が曲に合わせて踊ります。光の筋が曲線を描いて蛍を追いかけ、<strong>蛍に届いた瞬間</strong>に、その蛍の色のキーを押します。</p>
-    <ul class="keys" aria-label="キーと蛍の色の対応">
-      <li style="--c: var(--r0)"><kbd>D</kbd><span>若葉</span></li>
-      <li style="--c: var(--r1)"><kbd>F</kbd><span>山吹</span></li>
-      <li style="--c: var(--r2)"><kbd>J</kbd><span>空</span></li>
-      <li style="--c: var(--r3)"><kbd>K</kbd><span>撫子</span></li>
+    <p class="lede">2本の刃のような線が両側から近づき、<strong>ぴったり重なった瞬間</strong>にキーを押します。線は回転しながら閉じることもあります。画面は4つの区画に分かれていて、区画ごとにキーが決まっています。</p>
+    <ul class="keys" aria-label="キーと区画の対応">
+      <li style="--c: var(--z0)"><kbd>D</kbd><span>紅</span></li>
+      <li style="--c: var(--z1)"><kbd>F</kbd><span>金</span></li>
+      <li style="--c: var(--z2)"><kbd>J</kbd><span>翠</span></li>
+      <li style="--c: var(--z3)"><kbd>K</kbd><span>瑠璃</span></li>
     </ul>
     <div class="settings">
       <div class="row">
@@ -124,9 +124,9 @@
     </div>
     <div class="actions">
       <button class="primary" id="startBtn" type="button">演奏する</button>
-      <span class="hint">Space で開始 ・ プレイ中は Esc で中断 ・ スマホは蛍をタップ</span>
+      <span class="hint">Space で開始 ・ プレイ中は Esc で中断 ・ スマホは区画をタップ</span>
     </div>
-    <p class="meta">BPM 132 ・ 44小節 ・ 約1分20秒 ・ 曲はブラウザ内でリアルタイム合成</p>
+    <p class="meta">BPM 136 ・ 44小節 ・ 約1分20秒 ・ 曲はブラウザ内でリアルタイム合成。点線は、2本の線が重なる位置と角度です。</p>
   </section>
 </div>
 
@@ -156,9 +156,10 @@
   'use strict';
 
   // ===== Song =====
-  const BPM = 132;
+  const BPM = 136;
   const SPB = 60 / BPM;
   const LEAD_IN = 2.2;
+  const TAU = Math.PI * 2, DEG = Math.PI / 180;
 
   const css = getComputedStyle(document.documentElement);
   const hex = (v) => {
@@ -166,28 +167,31 @@
     return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
   };
   const INK = hex('--ink'), INK2 = hex('--ink-2'), PAPER = hex('--paper'), MUTED = hex('--muted');
-  const LANES = [
-    { code: 'KeyD', label: 'D', rgb: hex('--r0') },
-    { code: 'KeyF', label: 'F', rgb: hex('--r1') },
-    { code: 'KeyJ', label: 'J', rgb: hex('--r2') },
-    { code: 'KeyK', label: 'K', rgb: hex('--r3') },
+  const ZONES = [
+    { code: 'KeyD', label: 'D', rgb: hex('--z0') },
+    { code: 'KeyF', label: 'F', rgb: hex('--z1') },
+    { code: 'KeyJ', label: 'J', rgb: hex('--z2') },
+    { code: 'KeyK', label: 'K', rgb: hex('--z3') },
   ];
+  const ZONE_X = [-0.6, -0.2, 0.2, 0.6]; // zone centres in field units
   const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
 
+  // How the blades behave in each section: how far apart they start, how much they turn
+  // while closing, and which final angles they may take.
   const SECTIONS = [
-    { bar: 0, name: 'INTRO', hue: 2 },
-    { bar: 4, name: 'VERSE', hue: 0 },
-    { bar: 12, name: 'BUILD', hue: 1 },
-    { bar: 20, name: 'CHORUS', hue: 3 },
-    { bar: 28, name: 'BREAK', hue: 2 },
-    { bar: 32, name: 'CHORUS II', hue: 3 },
-    { bar: 40, name: 'OUTRO', hue: 0 },
+    { bar: 0, name: 'INTRO', gap: 0.26, spin: 0, angles: [0] },
+    { bar: 4, name: 'VERSE', gap: 0.28, spin: 0, angles: [0, 90] },
+    { bar: 12, name: 'BUILD', gap: 0.3, spin: 45, angles: [45, 135, 0] },
+    { bar: 20, name: 'CHORUS', gap: 0.32, spin: 90, angles: [0, 45, 90, 135] },
+    { bar: 28, name: 'BREAK', gap: 0.4, spin: 30, angles: [0, 90] },
+    { bar: 32, name: 'CHORUS II', gap: 0.32, spin: 180, angles: [0, 45, 90, 135] },
+    { bar: 40, name: 'OUTRO', gap: 0.26, spin: 0, angles: [0] },
   ];
   const BARS_TOTAL = 44;
   const SONG_END = BARS_TOTAL * 4 * SPB + 0.8;
 
-  // Chart: one string per bar, 16 steps. '0'-'3' = tap on that firefly,
-  // 'a'-'d' = hold on firefly 0-3 lasting while '-' follows. Arrays stack layers for chords.
+  // Chart: one string per bar, 16 steps. '0'-'3' = tap in that zone, 'a'-'d' = hold in zone 0-3
+  // while '-' follows. Arrays stack layers for chords.
   const BARS = [
     '0...1...2...3...', '3...2...1...0...', '0...2...1...3...', 'a-------2...3...',
     '0...1.2.3...2.1.', '0...3...1...2...', '0.1...2.3...2...', 'b-------0...3...',
@@ -202,41 +206,29 @@
     ['0...............', '3...............'], '1...2...1...2...', ['a---------------', 'd---------------'], '................',
   ];
 
-  // Dances: where each firefly sits, in units of the play area (x right, y down), at a beat.
-  const TAU = Math.PI * 2;
-  const DANCES = {
-    line: (l) => [(l - 1.5) * 0.4, 0.12],
-    wave: (l, b) => [(l - 1.5) * 0.42, 0.26 * Math.sin((b * Math.PI) / 2 + l * 1.1)],
-    diamond: (l, b) => { const a = (l * TAU) / 4 + (b * Math.PI) / 16; return [0.46 * Math.cos(a), 0.4 * Math.sin(a)]; },
-    spin: (l, b) => { const a = (l * TAU) / 4 + (b * Math.PI) / 4; return [0.42 * Math.cos(a), 0.36 * Math.sin(a)]; },
-    lissa: (l, b) => { const a = (b * Math.PI) / 8 + (l * Math.PI) / 2; return [0.6 * Math.sin(a), 0.4 * Math.sin(2 * a)]; },
-    pairs: (l, b) => {
-      const c = l < 2 ? -0.38 : 0.38, dir = l < 2 ? 1 : -1;
-      const a = ((b * Math.PI) / 4) * dir + (l % 2) * Math.PI;
-      return [c + 0.18 * Math.cos(a), 0.2 * Math.sin(a)];
-    },
-  };
-  // [bar, dance]; each change glides over 2 beats.
-  const DANCE_TL = [
-    [0, 'line'], [4, 'wave'], [12, 'diamond'], [16, 'spin'], [20, 'lissa'], [28, 'pairs'],
-    [32, 'lissa'], [34, 'spin'], [36, 'lissa'], [38, 'spin'], [40, 'line'],
-  ];
-
-  // G - Em - C - D. Lead pitch per firefly.
+  // Cm - Ab - Eb - Bb. Lead pitch per zone.
   const CHORDS = [
-    { pad: [55, 59, 62], bass: 43, lead: [67, 71, 74, 79] },
-    { pad: [55, 59, 64], bass: 40, lead: [67, 71, 76, 79] },
-    { pad: [55, 60, 64], bass: 36, lead: [67, 72, 76, 79] },
-    { pad: [54, 57, 62], bass: 38, lead: [66, 69, 74, 78] },
+    { pad: [55, 60, 63], bass: 36, lead: [67, 72, 75, 79] },
+    { pad: [56, 60, 63], bass: 44, lead: [68, 72, 75, 80] },
+    { pad: [55, 58, 63], bass: 39, lead: [67, 70, 75, 79] },
+    { pad: [53, 58, 62], bass: 46, lead: [65, 70, 74, 77] },
   ];
 
-  // ----- Parse chart -----
+  function secIndex(bar) {
+    let i = 0;
+    for (let k = 0; k < SECTIONS.length; k++) if (SECTIONS[k].bar <= bar) i = k;
+    return i;
+  }
+
+  // ----- Parse chart and give each note its pair of blades -----
   function mulberry32(a) {
     return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
   }
-  const rnd = mulberry32(132);
+  const rnd = mulberry32(136);
   const CHART = [];
+  const lastY = [0, 0, 0, 0];
   BARS.forEach((bar, bi) => {
+    const sec = SECTIONS[secIndex(bi)];
     for (const row of [].concat(bar)) {
       if (row.length !== 16) console.warn(`bar ${bi}: ${row.length} steps`);
       for (let i = 0; i < 16; i++) {
@@ -251,8 +243,13 @@
         }
         if (lane < 0) continue;
         const beat = bi * 4 + i / 4;
-        // where the light stream comes from, and which way it curls
-        CHART.push({ beat, t: beat * SPB, lane, dur: (len / 4) * SPB, from: rnd() * TAU, curl: rnd() < 0.5 ? -1 : 1 });
+        // step up or down the zone so back-to-back notes in one zone do not sit on top of each other
+        let y = (rnd() - 0.5) * 0.6;
+        if (Math.abs(y - lastY[lane]) < 0.18) y = lastY[lane] > 0 ? lastY[lane] - 0.3 : lastY[lane] + 0.3;
+        lastY[lane] = y;
+        const ang = sec.angles[Math.floor(rnd() * sec.angles.length)];
+        const spin = sec.spin * (rnd() < 0.5 ? -1 : 1);
+        CHART.push({ beat, t: beat * SPB, lane, dur: (len / 4) * SPB, x: ZONE_X[lane], y, ang, spin, gap: sec.gap });
       }
     }
   });
@@ -261,86 +258,63 @@
 
   // ===== Settings =====
   const settings = { speed: 1, offset: 0, auto: false };
-  try { Object.assign(settings, JSON.parse(localStorage.getItem('hotaru.settings') || '{}')); } catch (e) { /* storage unavailable */ }
-  const saveSettings = () => { try { localStorage.setItem('hotaru.settings', JSON.stringify(settings)); } catch (e) { /* ignore */ } };
-  let VIEW = 1.5 / settings.speed;
+  try { Object.assign(settings, JSON.parse(localStorage.getItem('hasami.settings') || '{}')); } catch (e) { /* storage unavailable */ }
+  const saveSettings = () => { try { localStorage.setItem('hasami.settings', JSON.stringify(settings)); } catch (e) { /* ignore */ } };
+  let VIEW = 1.3 / settings.speed;
 
   // ===== Canvas & layout =====
   const $ = (s) => document.querySelector(s);
   const cv = $('#stage');
   const g = cv.getContext('2d');
   let W = 0, H = 0, DPR = 1;
-  const A = { cx: 0, cy: 0, u: 1, portrait: false }, AG = { cx: 0, cy: 0, u: 1 };
+  const F = { cx: 0, cy: 0, u: 1, portrait: false }, FG = { cx: 0, cy: 0, u: 1 };
 
   function resize() {
     DPR = Math.min(2, window.devicePixelRatio || 1);
     W = window.innerWidth; H = window.innerHeight;
     cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
     g.setTransform(DPR, 0, 0, DPR, 0, 0);
-    areaGoal();
-    Object.assign(A, AG);
+    fieldGoal();
+    Object.assign(F, FG);
   }
-  function areaGoal() {
-    const top = Math.max(70, H * 0.09), bottom = Math.max(50, H * 0.06);
-    let x0 = 30, x1 = W - 30;
+  function fieldGoal() {
+    const top = Math.max(70, H * 0.09), bottom = Math.max(56, H * 0.07);
+    let x0 = 20, x1 = W - 20;
     if (W >= 900 && S.mode !== 'play') x0 = Math.max(W * 0.42, 560);
     const aw = x1 - x0, ah = H - top - bottom;
-    A.portrait = ah > aw * 1.2;
-    // dances span about ±0.65 across and ±0.5 down; on a tall screen they turn sideways
-    AG.u = A.portrait ? Math.min(aw / 2 / 0.55, ah / 2 / 0.7) : Math.min(aw / 2 / 0.7, ah / 2 / 0.55);
-    AG.cx = x0 + aw / 2; AG.cy = top + ah / 2;
+    F.portrait = ah > aw * 1.2;
+    FG.u = F.portrait ? Math.min(aw / 2 / 0.5, ah / 2 / 0.82) : Math.min(aw / 2 / 0.82, ah / 2 / 0.5);
+    FG.cx = x0 + aw / 2; FG.cy = top + ah / 2;
   }
-  const recR = () => Math.max(18, Math.min(36, A.u * 0.075));
+  // field units -> screen. On tall screens the zones stack top to bottom.
+  const toScreen = (x, y) => (F.portrait ? [F.cx - y * F.u, F.cy + x * F.u] : [F.cx + x * F.u, F.cy + y * F.u]);
+  const screenAngle = (deg) => (F.portrait ? deg + 90 : deg);
 
-  function secIndex(bar) {
-    let i = 0;
-    for (let k = 0; k < SECTIONS.length; k++) if (SECTIONS[k].bar <= bar) i = k;
-    return i;
+  // The two blades of a note at time now: centre line direction, normal, half-gap and blade length (pixels).
+  const BLADE = 0.3;
+  function blades(n, now) {
+    const s = Math.max(0, (n.t - now) / VIEW);
+    const a = (screenAngle(n.ang) + n.spin * s) * DEG;
+    const ux = Math.cos(a), uy = Math.sin(a), nx = -uy, ny = ux;
+    // sideways travel is squeezed so the blades stay near their zone
+    const across = Math.abs(F.portrait ? ny : nx);
+    const gap = n.gap * (1 - 0.45 * across) * s * F.u;
+    const [cx, cy] = toScreen(n.x, n.y);
+    return { cx, cy, ux, uy, nx, ny, gap, half: (BLADE * F.u) / 2, s };
   }
+
   const kickBar = (bar) => { const n = SECTIONS[secIndex(bar)].name; return (n !== 'INTRO' && n !== 'BREAK') || bar === 31; };
-
-  // Screen position of firefly `l` at song time t.
-  function recPos(l, t) {
-    const beat = t / SPB;
-    let i = 0;
-    for (let k = 0; k < DANCE_TL.length; k++) if (DANCE_TL[k][0] * 4 <= beat) i = k;
-    let [x, y] = DANCES[DANCE_TL[i][1]](l, beat);
-    if (i > 0) {
-      const k = (beat - DANCE_TL[i][0] * 4) / 2;
-      if (k < 1) {
-        const [px0, py0] = DANCES[DANCE_TL[i - 1][1]](l, beat);
-        const e = 0.5 - 0.5 * Math.cos(Math.PI * Math.max(0, k));
-        x = px0 + (x - px0) * e; y = py0 + (y - py0) * e;
-      }
-    }
-    // a little hop on every kick: lands on the beat, peaks halfway
-    if (beat >= 0 && kickBar(Math.floor(beat / 4))) y -= 0.035 * Math.sin(Math.PI * (beat - Math.floor(beat)));
-    if (A.portrait) { const tx = x; x = -y; y = tx; }
-    return [A.cx + x * A.u, A.cy + y * A.u];
-  }
-
-  // Light stream for note n at time now: quadratic curve from its source to the firefly as it is now.
-  function streamPoint(n, k, now, end) {
-    const hit = recPos(n.lane, n.t);
-    const D = Math.max(W, H) * 0.75;
-    const sx = hit[0] + Math.cos(n.from) * D, sy = hit[1] + Math.sin(n.from) * D;
-    const mx = (sx + hit[0]) / 2, my = (sy + hit[1]) / 2;
-    const cx = mx - Math.sin(n.from) * D * 0.45 * n.curl, cy = my + Math.cos(n.from) * D * 0.45 * n.curl;
-    const e = end || recPos(n.lane, now);
-    const a = (1 - k) * (1 - k), b = 2 * (1 - k) * k, c = k * k;
-    return [a * sx + b * cx + c * e[0], a * sy + b * cy + c * e[1]];
-  }
 
   // ===== Game state =====
   const S = {
     mode: 'title', notes: [], cursor: 0, auto: true, attract: true,
     combo: 0, maxCombo: 0, counts: { perfect: 0, great: 0, good: 0, miss: 0 }, weight: 0,
     pressed: [false, false, false, false], autoHold: [0, 0, 0, 0], flash: [0, 0, 0, 0],
-    popup: null, attractT0: 0,
+    popup: null, attractT0: 0, shake: 0,
   };
   const WIN = { perfect: 0.045, great: 0.09, good: 0.135 };
   const WEIGHT = { perfect: 1, great: 0.7, good: 0.4, miss: 0 };
-  const GRADE_COLOR = { perfect: PAPER, great: LANES[1].rgb, good: LANES[2].rgb, miss: MUTED };
+  const GRADE_COLOR = { perfect: PAPER, great: ZONES[1].rgb, good: ZONES[2].rgb, miss: MUTED };
 
   function newRun(auto, attract) {
     S.notes = CHART.map((c) => ({ ...c, end: c.t + c.dur, head: null, tail: null, holding: false }));
@@ -348,7 +322,7 @@
     S.combo = 0; S.maxCombo = 0; S.weight = 0;
     S.counts = { perfect: 0, great: 0, good: 0, miss: 0 };
     S.pressed.fill(false); S.autoHold.fill(0); S.flash.fill(0);
-    S.popup = null; particles.length = 0; rings.length = 0;
+    S.popup = null; particles.length = 0; cuts.length = 0;
   }
 
   const gradeOf = (adt) => (adt <= WIN.perfect ? 'perfect' : adt <= WIN.great ? 'great' : 'good');
@@ -358,11 +332,11 @@
     S.weight += WEIGHT[grade];
     if (grade === 'miss') S.combo = 0;
     else { S.combo++; S.maxCombo = Math.max(S.maxCombo, S.combo); }
-    S.popup = { grade, t: now, lane: n.lane };
+    S.popup = { grade, t: now, lane: n.lane, x: n.x, y: n.y };
     if (grade !== 'miss') {
-      const [x, y] = recPos(n.lane, now);
-      burst(x, y, LANES[n.lane].rgb, grade === 'perfect' ? 1 : 0.6);
+      cut(blades(n, n.t), ZONES[n.lane].rgb, grade === 'perfect' ? 1 : 0.6);
       S.flash[n.lane] = 1;
+      if (grade === 'perfect' && !reduceMotion) S.shake = Math.max(S.shake, 2.5);
     }
   }
 
@@ -413,140 +387,113 @@
   }
 
   // ===== Effects =====
-  const particles = [], rings = [];
+  const particles = [], cuts = [];
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  function burst(x, y, col, power) {
-    rings.push({ x, y, col, life: 0, max: 0.4 });
-    const n = reduceMotion ? 4 : Math.round(18 * power);
+  // a bright slash where the blades met, with sparks thrown out to both sides
+  function cut(b, col, power) {
+    cuts.push({ ...b, col, life: 0, max: 0.4 });
+    const n = reduceMotion ? 4 : Math.round(20 * power);
     for (let i = 0; i < n; i++) {
-      const a = Math.random() * TAU, v = (100 + Math.random() * 260) * power;
-      particles.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 40, life: 0, max: 0.4 + Math.random() * 0.5, col, size: 1.4 + Math.random() * 2.4 });
+      const along = (Math.random() - 0.5) * 2 * b.half, side = Math.random() < 0.5 ? -1 : 1;
+      const v = (140 + Math.random() * 320) * power, spread = (Math.random() - 0.5) * 0.8;
+      particles.push({
+        x: b.cx + b.ux * along, y: b.cy + b.uy * along,
+        vx: (b.nx * side + b.ux * spread) * v, vy: (b.ny * side + b.uy * spread) * v,
+        life: 0, max: 0.25 + Math.random() * 0.3, col, size: 1.2 + Math.random() * 2,
+      });
     }
   }
   function drawEffects(dt) {
     g.globalCompositeOperation = 'lighter';
-    for (let i = rings.length - 1; i >= 0; i--) {
-      const r = rings[i]; r.life += dt;
-      if (r.life > r.max) { rings.splice(i, 1); continue; }
-      const u = r.life / r.max;
-      g.strokeStyle = rgba(r.col, 0.85 * (1 - u));
-      g.lineWidth = 3 * (1 - u) + 1;
-      g.beginPath(); g.arc(r.x, r.y, recR() * (1.1 + u * 1.8), 0, TAU); g.stroke();
+    g.lineCap = 'round';
+    for (let i = cuts.length - 1; i >= 0; i--) {
+      const c = cuts[i]; c.life += dt;
+      if (c.life > c.max) { cuts.splice(i, 1); continue; }
+      const u = c.life / c.max, ext = c.half * (1 + u * 0.5);
+      g.strokeStyle = rgba(c.col, 0.7 * (1 - u)); g.lineWidth = 16 * (1 - u) + 2;
+      g.beginPath(); g.moveTo(c.cx - c.ux * ext, c.cy - c.uy * ext); g.lineTo(c.cx + c.ux * ext, c.cy + c.uy * ext); g.stroke();
+      g.strokeStyle = rgba(PAPER, 0.9 * (1 - u)); g.lineWidth = 3 * (1 - u) + 0.5;
+      g.stroke();
     }
     for (let i = particles.length - 1; i >= 0; i--) {
       const p = particles[i]; p.life += dt;
       if (p.life > p.max) { particles.splice(i, 1); continue; }
-      p.vx *= 1 - dt * 2; p.vy = p.vy * (1 - dt * 2) - 30 * dt;
+      p.vx *= 1 - dt * 3; p.vy *= 1 - dt * 3;
       p.x += p.vx * dt; p.y += p.vy * dt;
-      g.fillStyle = rgba(p.col, 1 - p.life / p.max);
-      g.beginPath(); g.arc(p.x, p.y, p.size, 0, TAU); g.fill();
+      g.strokeStyle = rgba(p.col, 1 - p.life / p.max); g.lineWidth = p.size;
+      g.beginPath(); g.moveTo(p.x, p.y); g.lineTo(p.x - p.vx * 0.02, p.y - p.vy * 0.02); g.stroke();
     }
     g.globalCompositeOperation = 'source-over';
   }
 
-  // Night pond: soft drifting lights behind everything.
-  const bokeh = Array.from({ length: reduceMotion ? 0 : 46 }, (_, i) => ({ x: Math.random(), y: Math.random(), r: 6 + Math.random() * 26, s: 0.004 + Math.random() * 0.012, c: i % 4, ph: Math.random() * TAU }));
-  function drawBackground(now, beat, pulse, dt) {
-    const bg = g.createLinearGradient(0, 0, 0, H);
+  function drawBackground(beat, pulse, now) {
+    const bg = g.createLinearGradient(0, 0, W, H);
     bg.addColorStop(0, rgba(INK, 1)); bg.addColorStop(1, rgba(INK2, 1));
     g.fillStyle = bg; g.fillRect(0, 0, W, H);
-    const hue = LANES[SECTIONS[secIndex(Math.floor(beat / 4))].hue].rgb;
-    const glow = g.createRadialGradient(A.cx, A.cy, 0, A.cx, A.cy, A.u * 1.1);
-    glow.addColorStop(0, rgba(hue, 0.09 + 0.07 * pulse)); glow.addColorStop(1, rgba(hue, 0));
-    g.fillStyle = glow; g.fillRect(0, 0, W, H);
-    g.globalCompositeOperation = 'lighter';
-    for (const b of bokeh) {
-      b.y -= b.s * dt; b.x += Math.sin(now * 0.3 + b.ph) * 0.0006;
-      if (b.y < -0.05) { b.y = 1.05; b.x = Math.random(); }
-      const a = 0.035 + 0.03 * Math.sin(now * 1.3 + b.ph);
-      g.fillStyle = rgba(LANES[b.c].rgb, Math.max(0, a));
-      g.beginPath(); g.arc(b.x * W, b.y * H, b.r, 0, TAU); g.fill();
+    // the four zones: faint bands, lit while their key is down
+    const zw = 0.4 * F.u, zh = 1.0 * F.u;
+    for (let z = 0; z < 4; z++) {
+      const [x, y] = toScreen(ZONE_X[z], 0), col = ZONES[z].rgb;
+      const down = S.pressed[z] || S.autoHold[z] > now;
+      const w = F.portrait ? zh : zw - 6, h = F.portrait ? zw - 6 : zh;
+      g.fillStyle = rgba(col, 0.025 + 0.02 * pulse + (down ? 0.06 : 0) + 0.06 * S.flash[z]);
+      g.fillRect(x - w / 2, y - h / 2, w, h);
+      g.strokeStyle = rgba(col, 0.12); g.lineWidth = 1;
+      g.strokeRect(x - w / 2, y - h / 2, w, h);
+      // key letter just outside the zone
+      const [lx, ly] = F.portrait ? [x - w / 2 - 16, y] : [x, y + h / 2 + 22];
+      g.fillStyle = down ? rgba(col, 1) : rgba(PAPER, 0.7);
+      g.font = '18px "Dela Gothic One", sans-serif';
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText(ZONES[z].label, lx, ly);
     }
-    g.globalCompositeOperation = 'source-over';
   }
 
-  function drawStreams(now) {
-    const r = recR();
+  function drawBlades(now) {
     g.lineCap = 'round';
     for (let i = S.notes.length - 1; i >= 0; i--) {
       const n = S.notes[i];
-      if (n.t - now > VIEW || n.end < now - 0.1) continue;
-      const col = LANES[n.lane].rgb;
-      const end = recPos(n.lane, now);
-      const kHead = Math.min(1, 1 - (n.t - now) / VIEW);
-      if (n.dur > 0 && n.tail === null && n.head !== 'miss') {
-        // a hold is a long ribbon: its tail travels the same curve one hold-length later
-        const kTail = Math.max(0, 1 - (n.end - now) / VIEW);
-        const k0 = kTail, k1 = n.holding ? 1 : Math.max(0, kHead);
-        if (k1 > k0) {
-          g.beginPath();
-          const steps = 24;
-          for (let s = 0; s <= steps; s++) {
-            const [x, y] = streamPoint(n, k0 + ((k1 - k0) * s) / steps, now, end);
-            if (s === 0) g.moveTo(x, y); else g.lineTo(x, y);
-          }
-          g.globalCompositeOperation = 'lighter';
-          g.strokeStyle = rgba(col, n.holding ? 0.35 : 0.22); g.lineWidth = r * 0.9; g.stroke();
-          g.globalCompositeOperation = 'source-over';
-          g.strokeStyle = rgba(col, 0.9); g.lineWidth = 2.5; g.stroke();
-        }
+      if (n.t - now > VIEW || n.end < now - 0.05) continue;
+      const col = ZONES[n.lane].rgb;
+      const b = blades(n, now);
+      const appear = Math.min(1, (VIEW - (n.t - now)) / 0.2);
+      if (n.dur > 0 && n.head && n.tail === null && n.head !== 'miss') {
+        // hold: the closed seam stays lit while a bead runs along it
+        const k = Math.min(1, Math.max(0, (now - n.t) / n.dur));
+        const f = blades(n, n.t);
+        const ax = f.cx - f.ux * f.half, ay = f.cy - f.uy * f.half, bx = f.cx + f.ux * f.half, by = f.cy + f.uy * f.half;
+        g.globalCompositeOperation = 'lighter';
+        g.strokeStyle = rgba(col, n.holding ? 0.45 : 0.2); g.lineWidth = 12;
+        g.beginPath(); g.moveTo(ax, ay); g.lineTo(bx, by); g.stroke();
+        g.globalCompositeOperation = 'source-over';
+        g.strokeStyle = rgba(PAPER, 0.85); g.lineWidth = 2;
+        g.beginPath(); g.moveTo(ax, ay); g.lineTo(ax + (bx - ax) * k, ay + (by - ay) * k); g.stroke();
+        g.fillStyle = rgba(PAPER, 1);
+        g.beginPath(); g.arc(ax + (bx - ax) * k, ay + (by - ay) * k, 5, 0, TAU); g.fill();
+        continue;
       }
-      if (n.head || kHead < 0) continue;
-      // approach ring closing on the firefly
-      const k = (n.t - now) / (VIEW * 0.6);
-      if (k < 1) {
-        g.strokeStyle = rgba(col, 0.25 + 0.6 * (1 - k)); g.lineWidth = 2;
-        g.beginPath(); g.arc(end[0], end[1], r * (1 + 1.8 * Math.max(0, k)), 0, TAU); g.stroke();
+      if (n.head) continue;
+      // where the blades will meet, and at what angle
+      const f = blades(n, n.t);
+      g.setLineDash([3, 6]);
+      g.strokeStyle = rgba(col, 0.3 * appear); g.lineWidth = 1.2;
+      g.beginPath(); g.moveTo(f.cx - f.ux * f.half, f.cy - f.uy * f.half); g.lineTo(f.cx + f.ux * f.half, f.cy + f.uy * f.half); g.stroke();
+      g.setLineDash([]);
+      // the closing gap between the blades
+      const p = (side, along) => [b.cx + b.nx * b.gap * side + b.ux * along, b.cy + b.ny * b.gap * side + b.uy * along];
+      const c1 = p(1, -b.half), c2 = p(1, b.half), c3 = p(-1, b.half), c4 = p(-1, -b.half);
+      g.fillStyle = rgba(col, (0.05 + 0.18 * (1 - b.s)) * appear);
+      g.beginPath(); g.moveTo(c1[0], c1[1]); g.lineTo(c2[0], c2[1]); g.lineTo(c3[0], c3[1]); g.lineTo(c4[0], c4[1]); g.closePath(); g.fill();
+      for (const [a0, a1] of [[c1, c2], [c4, c3]]) {
+        g.globalCompositeOperation = 'lighter';
+        g.strokeStyle = rgba(col, 0.3 * appear); g.lineWidth = 10;
+        g.beginPath(); g.moveTo(a0[0], a0[1]); g.lineTo(a1[0], a1[1]); g.stroke();
+        g.globalCompositeOperation = 'source-over';
+        g.strokeStyle = rgba(col, appear); g.lineWidth = 4;
+        g.stroke();
+        g.strokeStyle = rgba(PAPER, 0.75 * appear); g.lineWidth = 1.2;
+        g.stroke();
       }
-      // comet: bright head with a tail along its curve
-      const appear = Math.min(1, kHead / 0.08);
-      g.globalCompositeOperation = 'lighter';
-      for (let s = 12; s >= 1; s--) {
-        const kk = kHead - s * 0.012;
-        if (kk < 0) continue;
-        const [x, y] = streamPoint(n, kk, now, end);
-        g.fillStyle = rgba(col, 0.2 * (1 - s / 13) * appear);
-        g.beginPath(); g.arc(x, y, r * 0.42 * (1 - s / 16), 0, TAU); g.fill();
-      }
-      const [hx, hy] = streamPoint(n, kHead, now, end);
-      g.fillStyle = rgba(col, 0.35 * appear);
-      g.beginPath(); g.arc(hx, hy, r * 0.75, 0, TAU); g.fill();
-      g.globalCompositeOperation = 'source-over';
-      g.fillStyle = rgba(col, appear);
-      g.beginPath(); g.arc(hx, hy, r * 0.32, 0, TAU); g.fill();
-      g.fillStyle = rgba(PAPER, 0.9 * appear);
-      g.beginPath(); g.arc(hx, hy, r * 0.14, 0, TAU); g.fill();
-    }
-  }
-
-  function drawFireflies(now, dt) {
-    const r = recR();
-    // the path each firefly has just danced
-    g.lineCap = 'round';
-    for (let l = 0; l < 4; l++) {
-      g.beginPath();
-      for (let s = 0; s <= 16; s++) {
-        const [x, y] = recPos(l, now - s * 0.03);
-        if (s === 0) g.moveTo(x, y); else g.lineTo(x, y);
-      }
-      g.strokeStyle = rgba(LANES[l].rgb, 0.18); g.lineWidth = r * 0.35; g.stroke();
-    }
-    for (let l = 0; l < 4; l++) {
-      const [x, y] = recPos(l, now), col = LANES[l].rgb;
-      const down = S.pressed[l] || S.autoHold[l] > now;
-      S.flash[l] = Math.max(0, S.flash[l] - dt * 4);
-      const aura = g.createRadialGradient(x, y, r * 0.4, x, y, r * 2.6);
-      aura.addColorStop(0, rgba(col, 0.32 + 0.3 * S.flash[l] + (down ? 0.15 : 0))); aura.addColorStop(1, rgba(col, 0));
-      g.globalCompositeOperation = 'lighter';
-      g.fillStyle = aura; g.beginPath(); g.arc(x, y, r * 2.6, 0, TAU); g.fill();
-      g.globalCompositeOperation = 'source-over';
-      g.fillStyle = down ? rgba(col, 0.6) : rgba(INK, 0.8);
-      g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill();
-      g.strokeStyle = rgba(col, 1); g.lineWidth = 3; g.stroke();
-      g.fillStyle = rgba(PAPER, 0.95);
-      g.font = `${Math.round(r * 0.9)}px "Dela Gothic One", sans-serif`;
-      g.textAlign = 'center'; g.textBaseline = 'middle';
-      g.fillText(LANES[l].label, x, y + 1);
     }
   }
 
@@ -570,16 +517,14 @@
     g.fillText(`${sec.name} ・ ${S.auto ? 'AUTO' : 'PLAY'}`, W - 18, top + 12);
     const prog = Math.min(1, Math.max(0, now / (SONG_END - 0.8)));
     g.fillStyle = rgba(PAPER, 0.12); g.fillRect(0, 0, W, 3);
-    g.fillStyle = rgba(LANES[sec.hue].rgb, 0.9); g.fillRect(0, 0, W * prog, 3);
-    // the judgement floats just above the firefly that was hit
+    g.fillStyle = rgba(PAPER, 0.8); g.fillRect(0, 0, W * prog, 3);
     if (S.popup) {
       const age = now - S.popup.t;
       if (age > 0.5) S.popup = null;
       else {
-        const [x, y] = recPos(S.popup.lane, now);
-        const k = 1 + 0.25 * Math.max(0, 1 - age * 8);
+        const [x, y] = toScreen(S.popup.x, S.popup.y);
         g.save();
-        g.translate(x, y - recR() * 1.9 - age * 30); g.scale(k, k);
+        g.translate(x, y - 34 - age * 24);
         g.globalAlpha = Math.min(1, (0.5 - age) * 5);
         g.textAlign = 'center'; g.textBaseline = 'middle';
         g.font = '15px "Dela Gothic One", sans-serif';
@@ -593,7 +538,7 @@
   // ===== Audio =====
   const audio = (() => {
     let ac = null, out = null, noise = null, reverbIn = null, bus = null, master = null;
-    const PADV = 0.85;
+    const PADV = 0.8;
     const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
 
     function init() {
@@ -606,11 +551,11 @@
       noise = ac.createBuffer(1, len, ac.sampleRate);
       const nd = noise.getChannelData(0);
       for (let i = 0; i < len; i++) nd[i] = Math.random() * 2 - 1;
-      const irLen = Math.floor(ac.sampleRate * 2.8);
+      const irLen = Math.floor(ac.sampleRate * 2);
       const ir = ac.createBuffer(2, irLen, ac.sampleRate);
       for (let ch = 0; ch < 2; ch++) { const d = ir.getChannelData(ch); for (let i = 0; i < irLen; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / irLen, 3); }
       const rev = ac.createConvolver(); rev.buffer = ir;
-      const revOut = ac.createGain(); revOut.gain.value = 0.34;
+      const revOut = ac.createGain(); revOut.gain.value = 0.26;
       rev.connect(revOut); revOut.connect(master);
       reverbIn = rev;
     }
@@ -619,13 +564,13 @@
       if (out) { out.gain.setValueAtTime(0, ac.currentTime); setTimeout(((o) => () => o.disconnect())(out), 200); }
       out = ac.createGain(); out.connect(master);
       const mkBus = (v) => { const b = ac.createGain(); b.gain.value = v; b.connect(out); return b; };
-      bus = { drum: mkBus(0.85), bass: mkBus(0.75), pad: mkBus(PADV), lead: mkBus(0.55) };
-      const send = ac.createGain(); send.gain.value = 0.6; send.connect(reverbIn);
+      bus = { drum: mkBus(0.9), bass: mkBus(0.8), pad: mkBus(PADV), lead: mkBus(0.5) };
+      const send = ac.createGain(); send.gain.value = 0.5; send.connect(reverbIn);
       bus.pad.connect(send);
-      const leadSend = ac.createGain(); leadSend.gain.value = 0.4; bus.lead.connect(leadSend); leadSend.connect(reverbIn);
-      const delay = ac.createDelay(1); delay.delayTime.value = SPB * 0.75;
-      const fb = ac.createGain(); fb.gain.value = 0.32;
-      const dOut = ac.createGain(); dOut.gain.value = 0.25;
+      const leadSend = ac.createGain(); leadSend.gain.value = 0.3; bus.lead.connect(leadSend); leadSend.connect(reverbIn);
+      const delay = ac.createDelay(1); delay.delayTime.value = SPB * 0.5;
+      const fb = ac.createGain(); fb.gain.value = 0.25;
+      const dOut = ac.createGain(); dOut.gain.value = 0.2;
       bus.lead.connect(delay); delay.connect(fb); fb.connect(delay); delay.connect(dOut); dOut.connect(out);
     }
 
@@ -641,67 +586,64 @@
     const I = {
       kick(at) {
         const o = ac.createOscillator(), gn = ac.createGain();
-        o.frequency.setValueAtTime(150, at); o.frequency.exponentialRampToValueAtTime(44, at + 0.13);
-        gn.gain.setValueAtTime(0.95, at); gn.gain.exponentialRampToValueAtTime(0.001, at + 0.4);
-        o.connect(gn).connect(bus.drum); o.start(at); o.stop(at + 0.42);
-        bus.pad.gain.setValueAtTime(PADV * 0.4, at); bus.pad.gain.linearRampToValueAtTime(PADV, at + 0.28);
+        o.frequency.setValueAtTime(165, at); o.frequency.exponentialRampToValueAtTime(46, at + 0.11);
+        gn.gain.setValueAtTime(1, at); gn.gain.exponentialRampToValueAtTime(0.001, at + 0.36);
+        o.connect(gn).connect(bus.drum); o.start(at); o.stop(at + 0.38);
+        bus.pad.gain.setValueAtTime(PADV * 0.3, at); bus.pad.gain.linearRampToValueAtTime(PADV, at + 0.24);
       },
       snare(at) {
-        const f = ac.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 1800; f.Q.value = 0.7;
-        noiseSrc(at, 0.25).connect(f).connect(decayGain(at, 0.48, 0.002, 0.2)).connect(bus.drum);
-        const o = ac.createOscillator(); o.type = 'triangle'; o.frequency.setValueAtTime(185, at);
-        o.connect(decayGain(at, 0.26, 0.002, 0.08)).connect(bus.drum); o.start(at); o.stop(at + 0.12);
-      },
-      shaker(at) {
-        const f = ac.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 6500; f.Q.value = 1.2;
-        noiseSrc(at, 0.08).connect(f).connect(decayGain(at, 0.12, 0.012, 0.05)).connect(bus.drum);
+        const f = ac.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 2400; f.Q.value = 0.6;
+        noiseSrc(at, 0.22).connect(f).connect(decayGain(at, 0.55, 0.001, 0.15)).connect(bus.drum);
+        const o = ac.createOscillator(); o.type = 'triangle'; o.frequency.setValueAtTime(210, at);
+        o.connect(decayGain(at, 0.3, 0.001, 0.06)).connect(bus.drum); o.start(at); o.stop(at + 0.09);
       },
       hat(at, open) {
-        const f = ac.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 7200;
-        noiseSrc(at, open ? 0.3 : 0.08).connect(f).connect(decayGain(at, open ? 0.13 : 0.1, 0.001, open ? 0.22 : 0.045)).connect(bus.drum);
+        const f = ac.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 8000;
+        noiseSrc(at, open ? 0.3 : 0.06).connect(f).connect(decayGain(at, open ? 0.13 : 0.1, 0.001, open ? 0.18 : 0.03)).connect(bus.drum);
       },
       crash(at) {
-        const f = ac.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 3800;
-        const gn = decayGain(at, 0.18, 0.002, 1.8);
-        noiseSrc(at, 1.9).connect(f).connect(gn); gn.connect(bus.drum); gn.connect(reverbIn);
+        const f = ac.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 4000;
+        const gn = decayGain(at, 0.2, 0.002, 1.4);
+        noiseSrc(at, 1.5).connect(f).connect(gn); gn.connect(bus.drum); gn.connect(reverbIn);
       },
       bass(at, midi, dur) {
-        const f = ac.createBiquadFilter(); f.type = 'lowpass'; f.Q.value = 4;
-        f.frequency.setValueAtTime(900, at); f.frequency.exponentialRampToValueAtTime(200, at + Math.max(0.08, dur * 0.9));
-        const gn = decayGain(at, 0.34, 0.006, dur);
-        const o = ac.createOscillator(); o.type = 'triangle'; o.frequency.value = mtof(midi);
+        const f = ac.createBiquadFilter(); f.type = 'lowpass'; f.Q.value = 8;
+        f.frequency.setValueAtTime(1800, at); f.frequency.exponentialRampToValueAtTime(240, at + Math.max(0.06, dur * 0.7));
+        const gn = decayGain(at, 0.32, 0.003, dur);
+        const o = ac.createOscillator(); o.type = 'sawtooth'; o.frequency.value = mtof(midi);
         const sub = ac.createOscillator(); sub.type = 'sine'; sub.frequency.value = mtof(midi);
-        const sg = ac.createGain(); sg.gain.value = 0.7;
+        const sg = ac.createGain(); sg.gain.value = 0.6;
         o.connect(f); f.connect(gn); sub.connect(sg).connect(gn); gn.connect(bus.bass);
         o.start(at); sub.start(at); o.stop(at + dur + 0.05); sub.stop(at + dur + 0.05);
       },
       pad(at, midis, dur) {
-        const f = ac.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 1100;
+        const f = ac.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 1300;
         const gn = ac.createGain();
-        gn.gain.setValueAtTime(0, at); gn.gain.linearRampToValueAtTime(0.05, at + 0.4);
-        gn.gain.setValueAtTime(0.05, at + dur - 0.05); gn.gain.linearRampToValueAtTime(0, at + dur + 0.5);
+        gn.gain.setValueAtTime(0, at); gn.gain.linearRampToValueAtTime(0.045, at + 0.3);
+        gn.gain.setValueAtTime(0.045, at + dur - 0.05); gn.gain.linearRampToValueAtTime(0, at + dur + 0.4);
         f.connect(gn).connect(bus.pad);
         for (const m of midis) for (const det of [-10, 10]) {
           const o = ac.createOscillator(); o.type = 'sawtooth'; o.frequency.value = mtof(m); o.detune.value = det;
-          o.connect(f); o.start(at); o.stop(at + dur + 0.55);
+          o.connect(f); o.start(at); o.stop(at + dur + 0.45);
         }
       },
-      // Kalimba-like pluck: a sine whose pitch is briefly frequency-modulated, then rings out.
+      // Metallic stab: a square through a snapping filter with a short "shk" of noise on top.
       lead(at, midi, dur) {
         const f0 = mtof(midi);
+        const f = ac.createBiquadFilter(); f.type = 'lowpass'; f.Q.value = 6;
+        f.frequency.setValueAtTime(7000, at); f.frequency.exponentialRampToValueAtTime(1200, at + 0.12);
         const gn = ac.createGain();
-        gn.gain.setValueAtTime(0.0001, at); gn.gain.exponentialRampToValueAtTime(0.3, at + 0.003);
-        if (dur < 0.3) gn.gain.exponentialRampToValueAtTime(0.0001, at + 0.6);
-        else { gn.gain.exponentialRampToValueAtTime(0.11, at + 0.2); gn.gain.setValueAtTime(0.11, at + dur); gn.gain.exponentialRampToValueAtTime(0.0001, at + dur + 0.4); }
-        gn.connect(bus.lead);
-        const end = at + Math.max(0.65, dur + 0.45);
-        const car = ac.createOscillator(); car.type = 'sine'; car.frequency.value = f0;
-        const mod = ac.createOscillator(); mod.type = 'sine'; mod.frequency.value = f0 * 3.5;
-        const mg = ac.createGain();
-        mg.gain.setValueAtTime(f0 * 1.6, at); mg.gain.exponentialRampToValueAtTime(1, at + 0.18);
-        mod.connect(mg).connect(car.frequency);
-        car.connect(gn);
-        car.start(at); mod.start(at); car.stop(end); mod.stop(end);
+        gn.gain.setValueAtTime(0.0001, at); gn.gain.exponentialRampToValueAtTime(0.16, at + 0.002);
+        if (dur < 0.3) gn.gain.exponentialRampToValueAtTime(0.0001, at + 0.32);
+        else { gn.gain.exponentialRampToValueAtTime(0.07, at + 0.15); gn.gain.setValueAtTime(0.07, at + dur); gn.gain.exponentialRampToValueAtTime(0.0001, at + dur + 0.25); }
+        const end = at + Math.max(0.35, dur + 0.3);
+        const o1 = ac.createOscillator(); o1.type = 'square'; o1.frequency.value = f0;
+        const o2 = ac.createOscillator(); o2.type = 'sawtooth'; o2.frequency.value = f0 * 1.5; o2.detune.value = 6;
+        const g2 = ac.createGain(); g2.gain.value = 0.25;
+        o1.connect(f); o2.connect(g2).connect(f); f.connect(gn).connect(bus.lead);
+        o1.start(at); o2.start(at); o1.stop(end); o2.stop(end);
+        const hp = ac.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 6000;
+        noiseSrc(at, 0.05).connect(hp).connect(decayGain(at, 0.06, 0.001, 0.03)).connect(bus.lead);
       },
     };
 
@@ -712,11 +654,12 @@
         const b0 = bar * 4, ch = CHORDS[bar % 4], name = SECTIONS[secIndex(bar)].name;
         add(b0, 'pad', ch.pad, 4 * SPB);
         if (name === 'INTRO') {
-          if (bar >= 2) for (let i = 0; i < 8; i++) add(b0 + i / 2, 'shaker');
+          if (bar >= 2) for (let i = 0; i < 8; i++) add(b0 + i / 2, 'hat', false);
         } else if (name === 'VERSE') {
-          for (let i = 0; i < 4; i++) { add(b0 + i, 'kick'); add(b0 + i + 0.5, 'shaker'); add(b0 + i + 0.5, 'bass', ch.bass, SPB * 0.45); }
+          for (let i = 0; i < 4; i++) { add(b0 + i, 'kick'); add(b0 + i + 0.5, 'hat', false); }
+          for (const s of [0.5, 1.5, 2.5, 3.25, 3.5]) add(b0 + s, 'bass', ch.bass, SPB * 0.3);
         } else if (name === 'BUILD') {
-          for (let i = 0; i < 4; i++) { add(b0 + i, 'kick'); add(b0 + i + 0.5, 'bass', ch.bass, SPB * 0.45); }
+          for (let i = 0; i < 4; i++) { add(b0 + i, 'kick'); add(b0 + i + 0.5, 'bass', ch.bass, SPB * 0.4); }
           for (let i = 0; i < 16; i++) add(b0 + i / 4, 'hat', false);
           if (bar === 19) for (let i = 8; i < 16; i++) add(b0 + i / 4, 'snare');
           else { add(b0 + 1, 'snare'); add(b0 + 3, 'snare'); }
@@ -724,15 +667,13 @@
           if (bar % 4 === 0) add(b0, 'crash');
           for (let i = 0; i < 4; i++) {
             add(b0 + i, 'kick');
-            add(b0 + i, 'bass', ch.bass, SPB * 0.45);
-            add(b0 + i + 0.5, 'bass', ch.bass + 12, SPB * 0.45);
             add(b0 + i + 0.5, 'hat', true);
-            add(b0 + i + 0.25, 'shaker'); add(b0 + i + 0.75, 'shaker');
+            add(b0 + i + 0.25, 'hat', false); add(b0 + i + 0.75, 'hat', false);
+            add(b0 + i + 0.5, 'bass', ch.bass, SPB * 0.25); add(b0 + i + 0.75, 'bass', ch.bass + 12, SPB * 0.2);
           }
           add(b0 + 1, 'snare'); add(b0 + 3, 'snare');
         } else if (name === 'BREAK') {
           add(b0, 'bass', ch.bass, SPB * 3.5);
-          for (let i = 0; i < 8; i++) add(b0 + i / 2, 'shaker');
           if (bar === 31) { for (let i = 0; i < 4; i++) add(b0 + i, 'kick'); for (let i = 8; i < 16; i++) add(b0 + i / 4, 'snare'); }
         } else if (name === 'OUTRO') {
           if (bar === 40) add(b0, 'crash');
@@ -803,7 +744,7 @@
     newRun(true, true);
     S.attractT0 = performance.now() / 1000 - ATTRACT_FROM;
     titleWrap.hidden = false; resultWrap.hidden = true;
-    areaGoal();
+    fieldGoal();
     $('#startBtn').focus({ preventScroll: true });
   }
 
@@ -811,7 +752,7 @@
     titleWrap.hidden = true; resultWrap.hidden = true;
     S.mode = 'play';
     newRun(settings.auto, false);
-    areaGoal();
+    fieldGoal();
     try { await audio.start(); } catch (e) { console.error(e); }
   }
 
@@ -828,12 +769,12 @@
     $('#resMiss').textContent = S.counts.miss;
     $('#resCombo').textContent = `${S.maxCombo} / ${TOTAL_JUDGES}`;
     resultWrap.hidden = false;
-    areaGoal();
+    fieldGoal();
     $('#againBtn').focus({ preventScroll: true });
   }
 
   // ===== Input =====
-  const laneByCode = Object.fromEntries(LANES.map((l, i) => [l.code, i]));
+  const laneByCode = Object.fromEntries(ZONES.map((z, i) => [z.code, i]));
   window.addEventListener('keydown', (e) => {
     if (S.mode === 'play') {
       if (e.code === 'Escape') { enterTitle(); return; }
@@ -854,18 +795,16 @@
     release(l, audio.songTime());
   });
 
-  // Touch: tap the firefly itself (nearest one within reach).
+  // Touch: tap inside a zone.
   const pointerLane = new Map();
   cv.addEventListener('pointerdown', (e) => {
     if (S.mode !== 'play' || S.auto) return;
     e.preventDefault();
-    const now = audio.songTime();
-    let best = -1, bd = Infinity;
-    for (let l = 0; l < 4; l++) { const [x, y] = recPos(l, now); const d = Math.hypot(x - e.clientX, y - e.clientY); if (d < bd) { bd = d; best = l; } }
-    if (bd > recR() * 2.4) return;
-    pointerLane.set(e.pointerId, best);
-    S.pressed[best] = true;
-    press(best, now);
+    const along = F.portrait ? (e.clientY - F.cy) / F.u : (e.clientX - F.cx) / F.u;
+    const l = Math.max(0, Math.min(3, Math.floor((along + 0.8) / 0.4)));
+    pointerLane.set(e.pointerId, l);
+    S.pressed[l] = true;
+    press(l, audio.songTime());
   });
   const endPointer = (e) => {
     const l = pointerLane.get(e.pointerId);
@@ -883,7 +822,7 @@
     speed.value = settings.speed; $('#speedOut').textContent = Number(settings.speed).toFixed(1);
     offset.value = settings.offset; $('#offsetOut').textContent = `${settings.offset > 0 ? '+' : ''}${settings.offset} ms`;
     auto.checked = !!settings.auto;
-    VIEW = 1.5 / settings.speed;
+    VIEW = 1.3 / settings.speed;
   };
   speed.addEventListener('input', () => { settings.speed = +speed.value; syncUi(); saveSettings(); });
   offset.addEventListener('input', () => { settings.offset = +offset.value; syncUi(); saveSettings(); });
@@ -906,16 +845,19 @@
       if (now > SONG_END - 1) { newRun(true, true); S.attractT0 = ts / 1000 - ATTRACT_FROM; now = ATTRACT_FROM; }
     }
     const ease = Math.min(1, dt * 4);
-    for (const k of ['cx', 'cy', 'u']) A[k] += (AG[k] - A[k]) * ease;
+    for (const k of ['cx', 'cy', 'u']) F[k] += (FG[k] - F[k]) * ease;
+    for (let z = 0; z < 4; z++) S.flash[z] = Math.max(0, S.flash[z] - dt * 4);
 
     const beat = now / SPB;
     const pulse = beat >= 0 && kickBar(Math.floor(beat / 4)) ? Math.exp(-(beat - Math.floor(beat)) * 5) : 0;
 
     updateJudge(now);
-    drawBackground(now, beat, pulse, dt);
-    drawStreams(now);
-    drawFireflies(now, dt);
+    g.save();
+    if (S.shake > 0) { g.translate((Math.random() - 0.5) * S.shake, (Math.random() - 0.5) * S.shake); S.shake = Math.max(0, S.shake - dt * 20); }
+    drawBackground(beat, pulse, now);
+    drawBlades(now);
     drawEffects(dt);
+    g.restore();
     if (S.mode === 'play') drawHud(now, beat);
     if (S.mode === 'play' && now > SONG_END) showResult();
     requestAnimationFrame(frame);
@@ -927,7 +869,7 @@
   enterTitle();
   requestAnimationFrame(frame);
   if (document.fonts && document.fonts.load) document.fonts.load('20px "Dela Gothic One"').catch(() => {});
-  window.__hotaru = { S, CHART, startGame };
+  window.__hasami = { S, CHART, startGame };
 })();
 </script>
 </body>
