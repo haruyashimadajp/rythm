@@ -1,0 +1,929 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Furiko Metronome</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=Zen+Kaku+Gothic+New:wght@400;700&display=swap">
+<style>
+  :root {
+    /* Layout: full-bleed walnut canvas; a metronome arm swings over a fan of four bands; HTML panels float over it for title and results */
+    --ink: #120c08;
+    --ink-2: #2a1a10;
+    --panel: rgba(18, 12, 8, 0.86);
+    --paper: #f6eee0;
+    --muted: #b8a58e;
+    --line: rgba(246, 238, 224, 0.16);
+    --brass: #dcb66a;
+    --b0: #ff6a4d; /* 朱   D (inner) */
+    --b1: #e8b04a; /* 黄土 F */
+    --b2: #4fc9a6; /* 青竹 J */
+    --b3: #7c95ff; /* 藍   K (outer) */
+    --font-display: "Dela Gothic One", "Zen Kaku Gothic New", "Hiragino Sans", sans-serif;
+    --font-body: "Zen Kaku Gothic New", "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+    color-scheme: dark;
+  }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; margin: 0; overflow: hidden; background: var(--ink); color: var(--paper); font-family: var(--font-body); }
+  canvas#stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+
+  .panel-wrap {
+    position: fixed; inset: 0; display: flex; align-items: flex-end; justify-content: flex-start;
+    padding-block: max(20px, env(safe-area-inset-bottom, 0px)) max(20px, env(safe-area-inset-bottom, 0px));
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    pointer-events: none;
+  }
+  .panel {
+    pointer-events: auto; width: min(440px, 100%); box-sizing: border-box;
+    background: var(--panel); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--line); border-radius: 14px; padding: 22px 22px 18px;
+    display: grid; gap: 16px;
+  }
+  .brand { display: grid; gap: 4px; }
+  h1 { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: 2.7rem; line-height: 1; letter-spacing: 0.06em; color: var(--brass); }
+  .sub { margin: 0; color: var(--muted); font-size: 0.86rem; letter-spacing: 0.08em; }
+  .lede { margin: 0; line-height: 1.75; font-size: 0.95rem; }
+  .lede strong { color: var(--brass); font-weight: 700; }
+
+  .keys { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .keys li { display: grid; justify-items: center; gap: 4px; padding: 8px 0 6px; border-radius: 10px; border: 1.5px solid var(--c); background: color-mix(in srgb, var(--c) 14%, transparent); }
+  .keys kbd { font-family: var(--font-display); font-size: 1.3rem; color: var(--paper); }
+  .keys span { font-size: 0.74rem; color: var(--c); font-weight: 700; letter-spacing: 0.06em; }
+
+  .settings { display: grid; gap: 10px; }
+  .row { display: grid; grid-template-columns: 8.5em 1fr 4.2em; align-items: center; gap: 10px; font-size: 0.86rem; }
+  .row output { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .row small { grid-column: 2 / 4; color: var(--muted); font-size: 0.74rem; margin-top: -6px; }
+  input[type=range] { width: 100%; accent-color: var(--brass); }
+  .check { display: flex; align-items: center; gap: 8px; font-size: 0.86rem; cursor: pointer; }
+  .check input { accent-color: var(--brass); width: 16px; height: 16px; }
+
+  .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+  button {
+    font: inherit; font-weight: 700; cursor: pointer; border-radius: 999px; padding: 10px 22px;
+    border: 1.5px solid var(--line); background: transparent; color: var(--paper);
+  }
+  button.primary { background: var(--paper); color: var(--ink); border-color: var(--paper); }
+  button:hover { border-color: var(--paper); }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+  .hint { color: var(--muted); font-size: 0.76rem; }
+  .meta { margin: 0; color: var(--muted); font-size: 0.74rem; border-top: 1px solid var(--line); padding-top: 12px; }
+
+  .eyebrow { margin: 0; font-size: 0.74rem; letter-spacing: 0.24em; color: var(--muted); }
+  .result-head { display: flex; align-items: baseline; gap: 16px; }
+  .rank { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: 4rem; line-height: 1; color: var(--brass); }
+  .score { font-family: var(--font-display); font-size: 2rem; font-variant-numeric: tabular-nums; }
+  .stats { margin: 0; display: grid; grid-template-columns: 1fr auto; gap: 6px 16px; font-size: 0.9rem; }
+  .stats dt { color: var(--muted); letter-spacing: 0.08em; }
+  .stats dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
+
+  @media (min-width: 900px) {
+    .panel-wrap { align-items: center; padding-left: max(48px, env(safe-area-inset-left, 0px)); }
+  }
+  @media (max-height: 700px) and (max-width: 899px) {
+    .lede, .meta { display: none; }
+  }
+</style>
+</head>
+<body>
+<canvas id="stage" aria-label="プレイ画面"></canvas>
+
+<div class="panel-wrap" id="titleWrap">
+  <section class="panel" aria-labelledby="gameTitle">
+    <div class="brand">
+      <h1 id="gameTitle">FURIKO</h1>
+      <p class="sub">メトロノーム ・ 振り子判定線のプロトタイプ</p>
+    </div>
+    <p class="lede">判定線は<strong>メトロノームの振り子</strong>です。扇形に並んだ4本の帯の上にノーツが置いてあり、振り子が通過した瞬間に、その帯のキーを押します。振り子は<strong>端でゆっくり、真ん中で速く</strong>動きます。</p>
+    <ul class="keys" aria-label="キーと帯の対応（内側から外側へ）">
+      <li style="--c: var(--b0)"><kbd>D</kbd><span>内側・朱</span></li>
+      <li style="--c: var(--b1)"><kbd>F</kbd><span>黄土</span></li>
+      <li style="--c: var(--b2)"><kbd>J</kbd><span>青竹</span></li>
+      <li style="--c: var(--b3)"><kbd>K</kbd><span>外側・藍</span></li>
+    </ul>
+    <div class="settings">
+      <div class="row">
+        <label for="offset">判定オフセット</label>
+        <input type="range" id="offset" min="-200" max="200" step="5" value="0">
+        <output id="offsetOut" for="offset">0 ms</output>
+        <small>音が遅れて聞こえるときは ＋ 側へ</small>
+      </div>
+      <label class="check"><input type="checkbox" id="auto"> オートプレイで見る</label>
+    </div>
+    <div class="actions">
+      <button class="primary" id="startBtn" type="button">演奏する</button>
+      <span class="hint">Space で開始 ・ プレイ中は Esc で中断 ・ スマホは帯をタップ</span>
+    </div>
+    <p class="meta">BPM 126 ・ 44小節 ・ 約1分25秒 ・ 曲はブラウザ内でリアルタイム合成。今のひと振りで当たるノーツははっきり、次のひと振りのノーツは薄く表示されます。</p>
+  </section>
+</div>
+
+<div class="panel-wrap" id="resultWrap" hidden>
+  <section class="panel" aria-labelledby="resRank">
+    <p class="eyebrow">RESULT</p>
+    <div class="result-head">
+      <h2 class="rank" id="resRank">S</h2>
+      <div class="score" id="resScore">0</div>
+    </div>
+    <dl class="stats">
+      <dt>PERFECT</dt><dd id="resPerfect">0</dd>
+      <dt>GREAT</dt><dd id="resGreat">0</dd>
+      <dt>GOOD</dt><dd id="resGood">0</dd>
+      <dt>MISS</dt><dd id="resMiss">0</dd>
+      <dt>MAX COMBO</dt><dd id="resCombo">0</dd>
+    </dl>
+    <div class="actions">
+      <button class="primary" id="againBtn" type="button">もう一度</button>
+      <button id="backBtn" type="button">タイトルへ</button>
+    </div>
+  </section>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  // ===== Song =====
+  const BPM = 126;
+  const SPB = 60 / BPM;
+  const LEAD_IN = 2.2;
+  const TAU = Math.PI * 2, DEG = Math.PI / 180;
+
+  const css = getComputedStyle(document.documentElement);
+  const hex = (v) => {
+    const h = css.getPropertyValue(v).trim().replace('#', '');
+    return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
+  };
+  const INK = hex('--ink'), INK2 = hex('--ink-2'), PAPER = hex('--paper'), MUTED = hex('--muted'), BRASS = hex('--brass');
+  // Bands from the pivot outward.
+  const BANDS = [
+    { code: 'KeyD', label: 'D', rgb: hex('--b0') },
+    { code: 'KeyF', label: 'F', rgb: hex('--b1') },
+    { code: 'KeyJ', label: 'J', rgb: hex('--b2') },
+    { code: 'KeyK', label: 'K', rgb: hex('--b3') },
+  ];
+  const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+
+  const SECTIONS = [
+    { bar: 0, name: 'INTRO' }, { bar: 4, name: 'VERSE' }, { bar: 12, name: 'BUILD' }, { bar: 20, name: 'CHORUS' },
+    { bar: 28, name: 'BREAK' }, { bar: 32, name: 'CHORUS II' }, { bar: 40, name: 'OUTRO' },
+  ];
+  const BARS_TOTAL = 44;
+  const SONG_END = BARS_TOTAL * 4 * SPB + 0.8;
+
+  // How the arm swings: [bar, beats per swing (one side to the other), amplitude in degrees].
+  // The arm crosses the centre on every whole swing count and turns around halfway between.
+  const SWINGS = [[0, 2, 35], [4, 2, 55], [12, 2, 60], [16, 1, 45], [20, 1, 65], [28, 4, 70], [32, 1, 70], [40, 2, 40]];
+  const segs = [];
+  {
+    let ph = 0;
+    SWINGS.forEach(([bar, per, amp], i) => {
+      const b0 = bar * 4;
+      if (i > 0) ph += (b0 - segs[i - 1].b0) / segs[i - 1].per;
+      segs.push({ b0, per, amp, ph0: ph });
+    });
+  }
+  const segAt = (beat) => { let s = segs[0]; for (const x of segs) if (x.b0 <= beat) s = x; return s; };
+  const phaseAt = (beat) => { const s = segAt(beat); return s.ph0 + (beat - s.b0) / s.per; };
+  function beatAtPhase(ph) {
+    let s = segs[0];
+    for (const x of segs) if (x.ph0 <= ph) s = x;
+    return s.b0 + (ph - s.ph0) * s.per;
+  }
+  function ampAt(beat) {
+    const i = segs.indexOf(segAt(beat));
+    if (i === 0) return segs[0].amp;
+    const k = Math.min(1, (beat - segs[i].b0) / 2);
+    const e = 0.5 - 0.5 * Math.cos(Math.PI * Math.max(0, k));
+    return segs[i - 1].amp + (segs[i].amp - segs[i - 1].amp) * e;
+  }
+  // CHORUS II tilts the whole metronome slowly from side to side.
+  const tiltAt = (beat) => (beat >= 128 && beat < 160 ? 12 * Math.sin((TAU * beat) / 16) : 0);
+  const armAngle = (beat) => tiltAt(beat) + ampAt(beat) * Math.sin(Math.PI * phaseAt(beat)); // degrees
+
+  // Chart: one string per bar, 16 steps. '0'-'3' = tap on that band, 'a'-'d' = hold on band 0-3
+  // while '-' follows. A hold must stay inside one swing so the arm sweeps along it in one direction.
+  const BARS = [
+    '0...1...2...3...', '3...2...1...0...', '0...0...3...3...', '1.2.3...2...a---',
+    '0...1.2.3...2.1.', '0...3...1...2...', '0.1...2.3...2...', '1...b-------....',
+    '3...2.1.0...1.2.', '3...0...2...1...', '3.2...1.0...1...', '....c-------0.1.',
+    '0.1.2.3.0.1.2.3.', '3.2.1.0.3.2.1.0.', ['0...1...2...3...', '2...3...0...1...'], '0.2.1.3.0.2.1.3.',
+    '0.1.0.1.2.3.2.3.', ['0...0...3...3...', '..1...1...2...2.'], '0.1.2.3.3.2.1.0.', '0.1.2.3.01230123',
+    ['0...2...0...2...', '..1...3...1...3.'], '..a---..1.2.3.2.', ['3...1...3...1...', '..2...0...2...0.'], '..d---..0.1.0123',
+    '0.1.2.3.0.1.2.3.', ['0...1...2...3...', '3...2...1...0...'], ['..b---..........', '......0.3.0.3.2.'], '0123..3210..0.3.',
+    '0...1...a-------', 'c-------3...1...', '0...1...b-------', 'd-------0.1.2.3.',
+    '0.2.1.3.0.2.1.3.', ['0...1...2...3...', '2...3...0...1...'], '0.1.2.3.01233210', '..c---..1.0.1.0.',
+    ['0...2...0...2...', '..1...3...1...3.'], '3.2.1.0.3.2.1.0.', ['0.0.....3.3.....', '....1.2.....2.1.'], ['0.1.2.3.0.1.2.3.', '........3.....0.'],
+    ['0...............', '3...............'], '1...2...1...2...', ['....a-------....', '....d-------....'], '................',
+  ];
+
+  // Bm - G - D - A. Lead pitch per band, low inside to high outside.
+  const CHORDS = [
+    { pad: [59, 62, 66], bass: 47, lead: [71, 74, 78, 83] },
+    { pad: [59, 62, 67], bass: 43, lead: [71, 74, 79, 83] },
+    { pad: [57, 62, 66], bass: 38, lead: [69, 74, 78, 81] },
+    { pad: [57, 61, 64], bass: 45, lead: [69, 73, 76, 81] },
+  ];
+
+  // ----- Parse chart -----
+  const CHART = [];
+  BARS.forEach((bar, bi) => {
+    for (const row of [].concat(bar)) {
+      if (row.length !== 16) console.warn(`bar ${bi}: ${row.length} steps`);
+      for (let i = 0; i < 16; i++) {
+        const c = row[i];
+        let lane = -1, len = 0;
+        if (c >= '0' && c <= '3') lane = +c;
+        else if (c >= 'a' && c <= 'd') {
+          lane = c.charCodeAt(0) - 97;
+          let j = i + 1;
+          while (j < 16 && row[j] === '-') j++;
+          len = j - i;
+        }
+        if (lane < 0) continue;
+        const beat = bi * 4 + i / 4, endBeat = beat + len / 4;
+        const ph = phaseAt(beat);
+        // the swing a note belongs to starts at the turnaround just before it
+        const swingStart = Math.ceil(ph - 0.5 - 1e-9) - 0.5;
+        // a hold sweeps from its head to the next turnaround at the latest
+        if (len && phaseAt(endBeat) > Math.floor(ph - 0.5 + 1e-9) + 1.5 + 1e-9) console.warn(`bar ${bi} step ${i}: hold crosses a turnaround`);
+        const atTurn = Math.abs(ph - 0.5 - Math.round(ph - 0.5)) < 1e-6;
+        CHART.push({
+          beat, t: beat * SPB, lane, dur: (len / 4) * SPB, ang: armAngle(beat), angEnd: armAngle(endBeat), atTurn,
+          show: beatAtPhase(swingStart) * SPB, ghost: beatAtPhase(swingStart - 1) * SPB,
+        });
+      }
+    }
+  });
+  CHART.sort((a, b) => a.t - b.t || a.lane - b.lane);
+  const TOTAL_JUDGES = CHART.reduce((n, c) => n + (c.dur > 0 ? 2 : 1), 0);
+
+  // ===== Settings =====
+  const settings = { offset: 0, auto: false };
+  try { Object.assign(settings, JSON.parse(localStorage.getItem('furiko.settings') || '{}')); } catch (e) { /* storage unavailable */ }
+  const saveSettings = () => { try { localStorage.setItem('furiko.settings', JSON.stringify(settings)); } catch (e) { /* ignore */ } };
+
+  // ===== Canvas & layout =====
+  const $ = (s) => document.querySelector(s);
+  const cv = $('#stage');
+  const g = cv.getContext('2d');
+  let W = 0, H = 0, DPR = 1;
+  // pivot, arm length, and the direction the arm points at rest (up on wide screens, right on tall ones)
+  const M = { px: 0, py: 0, len: 1, base: -90 }, MG = { px: 0, py: 0, len: 1, base: -90 };
+  const BAND_IN = 0.36, BAND_W = 0.16, BAND_GAP = 0.005;
+  const bandR = (i) => [M.len * (BAND_IN + i * BAND_W + BAND_GAP), M.len * (BAND_IN + (i + 1) * BAND_W - BAND_GAP)];
+
+  function resize() {
+    DPR = Math.min(2, window.devicePixelRatio || 1);
+    W = window.innerWidth; H = window.innerHeight;
+    cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+    g.setTransform(DPR, 0, 0, DPR, 0, 0);
+    layoutGoal();
+    Object.assign(M, MG);
+  }
+  function layoutGoal() {
+    const reach = Math.sin(82 * DEG);
+    let x0 = 20, x1 = W - 20;
+    if (W >= 900 && S.mode !== 'play') x0 = Math.max(W * 0.42, 560);
+    const aw = x1 - x0;
+    if (H > aw * 1.2) {
+      // tall screen: the metronome lies on its side, pivot at the left edge
+      MG.base = 0; MG.px = x0 + 14; MG.py = H * 0.52;
+      MG.len = Math.min(aw * 0.92, (H * 0.42) / reach);
+    } else {
+      MG.base = -90; MG.px = x0 + aw / 2; MG.py = H * 0.88;
+      MG.len = Math.min(H * 0.76, (aw / 2 - 10) / reach);
+    }
+  }
+  const dirOf = (deg) => { const a = (M.base + deg) * DEG; return [Math.cos(a), Math.sin(a)]; };
+  const at = (deg, r) => { const [dx, dy] = dirOf(deg); return [M.px + dx * r, M.py + dy * r]; };
+
+  function secIndex(bar) {
+    let i = 0;
+    for (let k = 0; k < SECTIONS.length; k++) if (SECTIONS[k].bar <= bar) i = k;
+    return i;
+  }
+  const kickBar = (bar) => { const n = SECTIONS[secIndex(bar)].name; return (n !== 'INTRO' && n !== 'BREAK') || bar === 31; };
+
+  // ===== Game state =====
+  const S = {
+    mode: 'title', notes: [], cursor: 0, auto: true, attract: true,
+    combo: 0, maxCombo: 0, counts: { perfect: 0, great: 0, good: 0, miss: 0 }, weight: 0,
+    pressed: [false, false, false, false], autoHold: [0, 0, 0, 0], flash: [0, 0, 0, 0],
+    popup: null, attractT0: 0,
+  };
+  const WIN = { perfect: 0.045, great: 0.09, good: 0.135 };
+  const WEIGHT = { perfect: 1, great: 0.7, good: 0.4, miss: 0 };
+  const GRADE_COLOR = { perfect: PAPER, great: BANDS[1].rgb, good: BANDS[2].rgb, miss: MUTED };
+
+  function newRun(auto, attract) {
+    S.notes = CHART.map((c) => ({ ...c, end: c.t + c.dur, head: null, tail: null, holding: false }));
+    S.cursor = 0; S.auto = auto; S.attract = attract;
+    S.combo = 0; S.maxCombo = 0; S.weight = 0;
+    S.counts = { perfect: 0, great: 0, good: 0, miss: 0 };
+    S.pressed.fill(false); S.autoHold.fill(0); S.flash.fill(0);
+    S.popup = null; particles.length = 0; rings.length = 0;
+  }
+
+  const gradeOf = (adt) => (adt <= WIN.perfect ? 'perfect' : adt <= WIN.great ? 'great' : 'good');
+
+  function judge(n, grade, now) {
+    S.counts[grade]++;
+    S.weight += WEIGHT[grade];
+    if (grade === 'miss') S.combo = 0;
+    else { S.combo++; S.maxCombo = Math.max(S.maxCombo, S.combo); }
+    S.popup = { grade, t: now };
+    if (grade !== 'miss') {
+      const [r0, r1] = bandR(n.lane);
+      const [x, y] = at(armAngle(now / SPB), (r0 + r1) / 2);
+      burst(x, y, BANDS[n.lane].rgb, grade === 'perfect' ? 1 : 0.6);
+      S.flash[n.lane] = 1;
+    }
+  }
+
+  function press(lane, now) {
+    for (let i = S.cursor; i < S.notes.length; i++) {
+      const n = S.notes[i];
+      if (n.t > now + WIN.good) break;
+      if (n.lane !== lane || n.head) continue;
+      const dt = now - n.t;
+      if (Math.abs(dt) > WIN.good) continue;
+      n.head = gradeOf(Math.abs(dt));
+      judge(n, n.head, now);
+      if (!S.attract && !S.auto) audio.tick();
+      if (n.dur > 0) n.holding = true;
+      return;
+    }
+  }
+
+  function release(lane, now) {
+    for (let i = S.cursor; i < S.notes.length; i++) {
+      const n = S.notes[i];
+      if (n.t > now) break;
+      if (n.lane !== lane || !n.holding) continue;
+      n.holding = false;
+      n.tail = now >= n.end - 0.12 ? 'perfect' : 'miss';
+      judge(n, n.tail, now);
+    }
+  }
+
+  function updateJudge(now) {
+    for (let i = S.cursor; i < S.notes.length; i++) {
+      const n = S.notes[i];
+      if (n.t > now + WIN.good) break;
+      if (S.auto && !n.head && n.t <= now) {
+        n.head = 'perfect'; judge(n, 'perfect', now);
+        if (n.dur > 0) { n.holding = true; S.autoHold[n.lane] = n.end; } else S.autoHold[n.lane] = Math.max(S.autoHold[n.lane], now + 0.08);
+      }
+      if (!n.head && now - n.t > WIN.good) {
+        n.head = 'miss'; judge(n, 'miss', now);
+        if (n.dur > 0) { n.tail = 'miss'; judge(n, 'miss', now); }
+      }
+      if (n.holding && now >= n.end) { n.holding = false; n.tail = 'perfect'; judge(n, 'perfect', now); }
+    }
+    while (S.cursor < S.notes.length) {
+      const n = S.notes[S.cursor];
+      if (n.head && (n.dur === 0 || n.tail)) S.cursor++; else break;
+    }
+  }
+
+  // ===== Effects =====
+  const particles = [], rings = [];
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function burst(x, y, col, power) {
+    rings.push({ x, y, col, life: 0, max: 0.35 });
+    const n = reduceMotion ? 4 : Math.round(14 * power);
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * TAU, v = (90 + Math.random() * 240) * power;
+      particles.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 0, max: 0.3 + Math.random() * 0.35, col, size: 1.3 + Math.random() * 2.2 });
+    }
+  }
+  function drawEffects(dt) {
+    g.globalCompositeOperation = 'lighter';
+    for (let i = rings.length - 1; i >= 0; i--) {
+      const r = rings[i]; r.life += dt;
+      if (r.life > r.max) { rings.splice(i, 1); continue; }
+      const u = r.life / r.max;
+      g.strokeStyle = rgba(r.col, 0.8 * (1 - u));
+      g.lineWidth = 2.5 * (1 - u) + 0.8;
+      g.beginPath(); g.arc(r.x, r.y, M.len * BAND_W * (0.3 + u * 0.9), 0, TAU); g.stroke();
+    }
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i]; p.life += dt;
+      if (p.life > p.max) { particles.splice(i, 1); continue; }
+      p.vx *= 1 - dt * 2.5; p.vy *= 1 - dt * 2.5;
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      g.fillStyle = rgba(p.col, 1 - p.life / p.max);
+      g.beginPath(); g.arc(p.x, p.y, p.size, 0, TAU); g.fill();
+    }
+    g.globalCompositeOperation = 'source-over';
+  }
+
+  // annular sector between two arm angles (degrees) and two radii
+  function sectorPath(a0, a1, r0, r1) {
+    const s = (M.base + Math.min(a0, a1)) * DEG, e = (M.base + Math.max(a0, a1)) * DEG;
+    g.beginPath();
+    g.arc(M.px, M.py, r1, s, e);
+    g.arc(M.px, M.py, r0, e, s, true);
+    g.closePath();
+  }
+
+  function drawBackground(beat, pulse) {
+    const bg = g.createRadialGradient(M.px, M.py, 0, M.px, M.py, Math.max(W, H));
+    bg.addColorStop(0, rgba(INK2, 1)); bg.addColorStop(1, rgba(INK, 1));
+    g.fillStyle = bg; g.fillRect(0, 0, W, H);
+    const glow = g.createRadialGradient(M.px, M.py, 0, M.px, M.py, M.len * 1.1);
+    glow.addColorStop(0, rgba(BRASS, 0.1 + 0.08 * pulse)); glow.addColorStop(1, rgba(BRASS, 0));
+    g.fillStyle = glow; g.fillRect(0, 0, W, H);
+  }
+
+  function drawFan(beat, now, dt) {
+    const amp = ampAt(beat), tilt = tiltAt(beat);
+    const a0 = tilt - amp - 6, a1 = tilt + amp + 6;
+    for (let i = 0; i < 4; i++) {
+      const [r0, r1] = bandR(i), col = BANDS[i].rgb;
+      sectorPath(a0, a1, r0, r1);
+      g.fillStyle = rgba(col, 0.07); g.fill();
+      g.strokeStyle = rgba(col, 0.28); g.lineWidth = 1; g.stroke();
+      // key letters just past both ends of each band
+      const down = S.pressed[i] || S.autoHold[i] > now;
+      g.font = `${Math.round(Math.max(13, (r1 - r0) * 0.5))}px "Dela Gothic One", sans-serif`;
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillStyle = down ? rgba(col, 1) : rgba(PAPER, 0.75);
+      for (const side of [a0 - 5, a1 + 5]) { const [x, y] = at(side, (r0 + r1) / 2); g.fillText(BANDS[i].label, x, y); }
+    }
+    // scale ticks around the outside, like a metronome face
+    g.strokeStyle = rgba(PAPER, 0.18); g.lineWidth = 1;
+    const rOut = M.len * (BAND_IN + 4 * BAND_W);
+    for (let a = -80; a <= 80; a += 10) {
+      const [x0, y0] = at(a + tilt, rOut + 4), [x1, y1] = at(a + tilt, rOut + (a % 30 === 0 ? 14 : 9));
+      g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.stroke();
+    }
+  }
+
+  function drawNotes(now) {
+    g.lineJoin = 'round';
+    for (let i = S.notes.length - 1; i >= 0; i--) {
+      const n = S.notes[i];
+      if (now < n.ghost || n.end < now - 0.05) continue;
+      const live = now >= n.show;
+      const [r0, r1] = bandR(n.lane), col = BANDS[n.lane].rgb;
+      const mid = (r0 + r1) / 2;
+      if (n.dur > 0 && n.tail === null && n.head !== 'miss') {
+        // hold: the stretch of band the arm will sweep while you keep holding.
+        // A hold whose head sits at a turnaround lies behind the arm on the way in, so its body
+        // stays an outline until the arm reaches the head and turns back over it.
+        const from = n.holding ? armAngle(now / SPB) : n.ang;
+        const solid = live && (!n.atTurn || now >= n.t - 0.06);
+        sectorPath(from, n.angEnd, r0 + 3, r1 - 3);
+        g.fillStyle = rgba(col, solid ? (n.holding ? 0.55 : 0.38) : 0.1); g.fill();
+        g.strokeStyle = rgba(col, solid ? 0.9 : 0.35); g.lineWidth = 1.5; g.stroke();
+      }
+      if (n.head) continue;
+      // a tick lying along the arm's direction; bright for this swing, an outline for the next
+      const half = Math.max(1.2, (7 / mid) / DEG);
+      sectorPath(n.ang - half, n.ang + half, r0 + 2, r1 - 2);
+      if (live) {
+        const k = Math.max(0, 1 - (n.t - now) / 0.8);
+        g.globalCompositeOperation = 'lighter';
+        g.strokeStyle = rgba(col, 0.25 + 0.35 * k); g.lineWidth = 8; g.stroke();
+        g.globalCompositeOperation = 'source-over';
+        g.fillStyle = rgba(col, 1); g.fill();
+        g.strokeStyle = rgba(PAPER, 0.8); g.lineWidth = 1.2; g.stroke();
+      } else {
+        g.strokeStyle = rgba(col, 0.45); g.lineWidth = 1.5; g.stroke();
+      }
+    }
+  }
+
+  function drawArm(now, dt) {
+    const beat = now / SPB, ang = armAngle(beat);
+    const rTip = M.len * (BAND_IN + 4 * BAND_W) + 18;
+    // motion blur: where the arm just was
+    g.globalCompositeOperation = 'lighter';
+    for (let k = 1; k <= 8; k++) {
+      const a = armAngle((now - k * 0.012) / SPB);
+      const [x, y] = at(a, rTip);
+      g.strokeStyle = rgba(BRASS, 0.07 * (1 - k / 9)); g.lineWidth = 6;
+      g.beginPath(); g.moveTo(M.px, M.py); g.lineTo(x, y); g.stroke();
+    }
+    g.globalCompositeOperation = 'source-over';
+    // band crossings light up when pressed
+    for (let i = 0; i < 4; i++) {
+      const [r0, r1] = bandR(i), col = BANDS[i].rgb;
+      const down = S.pressed[i] || S.autoHold[i] > now;
+      S.flash[i] = Math.max(0, S.flash[i] - dt * 4);
+      if (!down && S.flash[i] <= 0) continue;
+      const [x0, y0] = at(ang, r0), [x1, y1] = at(ang, r1);
+      g.globalCompositeOperation = 'lighter';
+      g.strokeStyle = rgba(col, 0.35 + 0.5 * S.flash[i]); g.lineWidth = 20; g.lineCap = 'round';
+      g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.stroke();
+      g.globalCompositeOperation = 'source-over';
+    }
+    const [tx, ty] = at(ang, rTip);
+    g.lineCap = 'round';
+    g.strokeStyle = rgba(BRASS, 0.35); g.lineWidth = 12;
+    g.beginPath(); g.moveTo(M.px, M.py); g.lineTo(tx, ty); g.stroke();
+    g.strokeStyle = rgba(BRASS, 1); g.lineWidth = 4;
+    g.beginPath(); g.moveTo(M.px, M.py); g.lineTo(tx, ty); g.stroke();
+    g.strokeStyle = rgba(PAPER, 0.9); g.lineWidth = 1.2;
+    g.beginPath(); g.moveTo(M.px, M.py); g.lineTo(tx, ty); g.stroke();
+    // the sliding weight: higher up the arm means a slower swing, as on a real metronome
+    const per = segAt(beat).per;
+    const wr = M.len * (0.12 + 0.055 * per);
+    const [wx, wy] = at(ang, wr), [dx, dy] = dirOf(ang);
+    const nx = -dy, ny = dx, ww = M.len * 0.045, wh = M.len * 0.035;
+    g.fillStyle = rgba(BRASS, 1);
+    g.beginPath();
+    g.moveTo(wx + nx * ww - dx * wh, wy + ny * ww - dy * wh);
+    g.lineTo(wx + nx * ww * 0.7 + dx * wh, wy + ny * ww * 0.7 + dy * wh);
+    g.lineTo(wx - nx * ww * 0.7 + dx * wh, wy - ny * ww * 0.7 + dy * wh);
+    g.lineTo(wx - nx * ww - dx * wh, wy - ny * ww - dy * wh);
+    g.closePath(); g.fill();
+    g.fillStyle = rgba(INK, 0.6);
+    g.beginPath(); g.arc(wx, wy, 2.2, 0, TAU); g.fill();
+    // pivot
+    g.fillStyle = rgba(BRASS, 1);
+    g.beginPath(); g.arc(M.px, M.py, 9, 0, TAU); g.fill();
+    g.fillStyle = rgba(INK, 0.8);
+    g.beginPath(); g.arc(M.px, M.py, 3.5, 0, TAU); g.fill();
+  }
+
+  const fmtScore = (n) => String(n).padStart(7, '0');
+  const currentScore = () => Math.round((1e6 * S.weight) / TOTAL_JUDGES);
+
+  function drawHud(now, beat) {
+    const top = Math.max(12, H * 0.02);
+    g.textBaseline = 'top';
+    g.textAlign = 'left'; g.fillStyle = rgba(PAPER, 0.95);
+    g.font = '22px "Dela Gothic One", sans-serif';
+    g.fillText(fmtScore(currentScore()), 18, top + 8);
+    if (S.combo >= 5) {
+      g.font = '700 13px "Zen Kaku Gothic New", sans-serif';
+      g.fillStyle = rgba(PAPER, 0.7);
+      g.fillText(`${S.combo} COMBO`, 18, top + 38);
+    }
+    const sec = SECTIONS[secIndex(Math.max(0, Math.floor(beat / 4)))];
+    const per = segAt(beat).per;
+    g.textAlign = 'right'; g.fillStyle = rgba(MUTED, 1);
+    g.font = '700 12px "Zen Kaku Gothic New", sans-serif';
+    g.fillText(`${sec.name} ・ ひと振り ${per} 拍 ・ ${S.auto ? 'AUTO' : 'PLAY'}`, W - 18, top + 12);
+    const prog = Math.min(1, Math.max(0, now / (SONG_END - 0.8)));
+    g.fillStyle = rgba(PAPER, 0.12); g.fillRect(0, 0, W, 3);
+    g.fillStyle = rgba(BRASS, 0.9); g.fillRect(0, 0, W * prog, 3);
+    if (S.popup) {
+      const age = now - S.popup.t;
+      if (age > 0.5) S.popup = null;
+      else {
+        const k = 1 + 0.25 * Math.max(0, 1 - age * 8);
+        const [x, y] = M.base === -90 ? [M.px, M.py - M.len * 0.2] : [M.px + M.len * 0.2, M.py - M.len * 0.1];
+        g.save();
+        g.translate(x, y); g.scale(k, k);
+        g.globalAlpha = Math.min(1, (0.5 - age) * 5);
+        g.textAlign = 'center'; g.textBaseline = 'middle';
+        g.font = '18px "Dela Gothic One", sans-serif';
+        g.fillStyle = rgba(GRADE_COLOR[S.popup.grade], 1);
+        g.fillText(S.popup.grade.toUpperCase(), 0, 0);
+        g.restore();
+      }
+    }
+  }
+
+  // ===== Audio =====
+  const audio = (() => {
+    let ac = null, out = null, noise = null, reverbIn = null, bus = null, master = null;
+    const PADV = 0.8;
+    const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
+
+    function init() {
+      ac = new (window.AudioContext || window.webkitAudioContext)();
+      const comp = ac.createDynamicsCompressor();
+      comp.threshold.value = -14; comp.ratio.value = 4; comp.attack.value = 0.004; comp.release.value = 0.2;
+      comp.connect(ac.destination);
+      master = ac.createGain(); master.gain.value = 0.75; master.connect(comp);
+      const len = ac.sampleRate;
+      noise = ac.createBuffer(1, len, ac.sampleRate);
+      const nd = noise.getChannelData(0);
+      for (let i = 0; i < len; i++) nd[i] = Math.random() * 2 - 1;
+      const irLen = Math.floor(ac.sampleRate * 2);
+      const ir = ac.createBuffer(2, irLen, ac.sampleRate);
+      for (let ch = 0; ch < 2; ch++) { const d = ir.getChannelData(ch); for (let i = 0; i < irLen; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / irLen, 3); }
+      const rev = ac.createConvolver(); rev.buffer = ir;
+      const revOut = ac.createGain(); revOut.gain.value = 0.28;
+      rev.connect(revOut); revOut.connect(master);
+      reverbIn = rev;
+    }
+
+    function newRun() {
+      if (out) { out.gain.setValueAtTime(0, ac.currentTime); setTimeout(((o) => () => o.disconnect())(out), 200); }
+      out = ac.createGain(); out.connect(master);
+      const mkBus = (v) => { const b = ac.createGain(); b.gain.value = v; b.connect(out); return b; };
+      bus = { drum: mkBus(0.85), bass: mkBus(0.75), pad: mkBus(PADV), lead: mkBus(0.5) };
+      const send = ac.createGain(); send.gain.value = 0.5; send.connect(reverbIn);
+      bus.pad.connect(send);
+      const leadSend = ac.createGain(); leadSend.gain.value = 0.3; bus.lead.connect(leadSend); leadSend.connect(reverbIn);
+    }
+
+    const decayGain = (at, peak, attack, decay) => {
+      const gn = ac.createGain();
+      gn.gain.setValueAtTime(0.0001, at);
+      gn.gain.exponentialRampToValueAtTime(peak, at + attack);
+      gn.gain.exponentialRampToValueAtTime(0.0001, at + attack + decay);
+      return gn;
+    };
+    const noiseSrc = (at, dur) => { const s = ac.createBufferSource(); s.buffer = noise; s.start(at, Math.random() * 0.5); s.stop(at + dur); return s; };
+
+    const I = {
+      kick(at) {
+        const o = ac.createOscillator(), gn = ac.createGain();
+        o.frequency.setValueAtTime(150, at); o.frequency.exponentialRampToValueAtTime(44, at + 0.13);
+        gn.gain.setValueAtTime(0.95, at); gn.gain.exponentialRampToValueAtTime(0.001, at + 0.4);
+        o.connect(gn).connect(bus.drum); o.start(at); o.stop(at + 0.42);
+        bus.pad.gain.setValueAtTime(PADV * 0.45, at); bus.pad.gain.linearRampToValueAtTime(PADV, at + 0.28);
+      },
+      snare(at) {
+        const f = ac.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 1900; f.Q.value = 0.7;
+        noiseSrc(at, 0.25).connect(f).connect(decayGain(at, 0.48, 0.002, 0.17)).connect(bus.drum);
+        const o = ac.createOscillator(); o.type = 'triangle'; o.frequency.setValueAtTime(190, at);
+        o.connect(decayGain(at, 0.26, 0.002, 0.07)).connect(bus.drum); o.start(at); o.stop(at + 0.1);
+      },
+      // wooden metronome click at every turnaround
+      tock(at, accent) {
+        const o = ac.createOscillator(); o.type = 'sine'; o.frequency.value = accent ? 1500 : 1100;
+        const f = ac.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = accent ? 1500 : 1100; f.Q.value = 6;
+        o.connect(f).connect(decayGain(at, accent ? 0.22 : 0.15, 0.001, 0.035)).connect(bus.drum); o.start(at); o.stop(at + 0.06);
+      },
+      hat(at, open) {
+        const f = ac.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 7200;
+        noiseSrc(at, open ? 0.3 : 0.08).connect(f).connect(decayGain(at, open ? 0.12 : 0.09, 0.001, open ? 0.2 : 0.04)).connect(bus.drum);
+      },
+      crash(at) {
+        const f = ac.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 3800;
+        const gn = decayGain(at, 0.18, 0.002, 1.6);
+        noiseSrc(at, 1.7).connect(f).connect(gn); gn.connect(bus.drum); gn.connect(reverbIn);
+      },
+      bass(at, midi, dur) {
+        const f = ac.createBiquadFilter(); f.type = 'lowpass'; f.Q.value = 3;
+        f.frequency.setValueAtTime(900, at); f.frequency.exponentialRampToValueAtTime(220, at + Math.max(0.08, dur * 0.9));
+        const gn = decayGain(at, 0.34, 0.005, dur);
+        const o = ac.createOscillator(); o.type = 'sawtooth'; o.frequency.value = mtof(midi);
+        const sub = ac.createOscillator(); sub.type = 'sine'; sub.frequency.value = mtof(midi - 12);
+        const sg = ac.createGain(); sg.gain.value = 0.6;
+        o.connect(f); f.connect(gn); sub.connect(sg).connect(gn); gn.connect(bus.bass);
+        o.start(at); sub.start(at); o.stop(at + dur + 0.05); sub.stop(at + dur + 0.05);
+      },
+      pad(at, midis, dur) {
+        const f = ac.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 1000;
+        const gn = ac.createGain();
+        gn.gain.setValueAtTime(0, at); gn.gain.linearRampToValueAtTime(0.045, at + 0.35);
+        gn.gain.setValueAtTime(0.045, at + dur - 0.05); gn.gain.linearRampToValueAtTime(0, at + dur + 0.45);
+        f.connect(gn).connect(bus.pad);
+        for (const m of midis) for (const det of [-7, 7]) {
+          const o = ac.createOscillator(); o.type = 'triangle'; o.frequency.value = mtof(m); o.detune.value = det;
+          o.connect(f); o.start(at); o.stop(at + dur + 0.5);
+        }
+      },
+      // Harpsichord-like pluck: bright saw and square through a filter that closes fast.
+      lead(at, midi, dur) {
+        const f0 = mtof(midi);
+        const f = ac.createBiquadFilter(); f.type = 'lowpass'; f.Q.value = 2;
+        f.frequency.setValueAtTime(6000, at); f.frequency.exponentialRampToValueAtTime(1400, at + 0.25);
+        const gn = ac.createGain();
+        gn.gain.setValueAtTime(0.0001, at); gn.gain.exponentialRampToValueAtTime(0.2, at + 0.002);
+        if (dur < 0.3) gn.gain.exponentialRampToValueAtTime(0.0001, at + 0.5);
+        else { gn.gain.exponentialRampToValueAtTime(0.08, at + 0.25); gn.gain.setValueAtTime(0.08, at + dur); gn.gain.exponentialRampToValueAtTime(0.0001, at + dur + 0.3); }
+        const end = at + Math.max(0.55, dur + 0.35);
+        const o1 = ac.createOscillator(); o1.type = 'sawtooth'; o1.frequency.value = f0;
+        const o2 = ac.createOscillator(); o2.type = 'square'; o2.frequency.value = f0 * 2; o2.detune.value = 4;
+        const g2 = ac.createGain(); g2.gain.value = 0.3;
+        o1.connect(f); o2.connect(g2).connect(f); f.connect(gn).connect(bus.lead);
+        o1.start(at); o2.start(at); o1.stop(end); o2.stop(end);
+      },
+    };
+
+    function buildSong() {
+      const ev = [];
+      const add = (beat, fn, ...a) => ev.push({ t: beat * SPB, fn, a });
+      for (let bar = 0; bar < BARS_TOTAL; bar++) {
+        const b0 = bar * 4, ch = CHORDS[bar % 4], name = SECTIONS[secIndex(bar)].name;
+        add(b0, 'pad', ch.pad, 4 * SPB);
+        if (name === 'VERSE') {
+          for (let i = 0; i < 4; i++) { add(b0 + i, 'kick'); add(b0 + i + 0.5, 'hat', false); add(b0 + i + 0.5, 'bass', ch.bass, SPB * 0.45); }
+        } else if (name === 'BUILD') {
+          for (let i = 0; i < 4; i++) { add(b0 + i, 'kick'); add(b0 + i + 0.5, 'bass', ch.bass, SPB * 0.45); }
+          for (let i = 0; i < 8; i++) add(b0 + i / 2, 'hat', false);
+          if (bar === 19) for (let i = 8; i < 16; i++) add(b0 + i / 4, 'snare');
+          else { add(b0 + 1, 'snare'); add(b0 + 3, 'snare'); }
+        } else if (name === 'CHORUS' || name === 'CHORUS II') {
+          if (bar % 4 === 0) add(b0, 'crash');
+          for (let i = 0; i < 4; i++) {
+            add(b0 + i, 'kick');
+            add(b0 + i, 'bass', ch.bass, SPB * 0.45); add(b0 + i + 0.5, 'bass', ch.bass + 12, SPB * 0.45);
+            add(b0 + i + 0.5, 'hat', true);
+          }
+          add(b0 + 1, 'snare'); add(b0 + 3, 'snare');
+        } else if (name === 'BREAK') {
+          add(b0, 'bass', ch.bass, SPB * 3.5);
+          if (bar === 31) { for (let i = 0; i < 4; i++) add(b0 + i, 'kick'); for (let i = 8; i < 16; i++) add(b0 + i / 4, 'snare'); }
+        } else if (name === 'OUTRO') {
+          if (bar === 40) add(b0, 'crash');
+          if (bar <= 41) { add(b0, 'kick'); add(b0 + 2, 'kick'); }
+          if (bar === 42) add(b0, 'bass', ch.bass, SPB * 4);
+        }
+      }
+      // the metronome itself clicks at each turnaround
+      const lastPh = phaseAt(BARS_TOTAL * 4);
+      for (let k = 0.5; k < lastPh; k += 1) add(beatAtPhase(k), 'tock', Math.round(k - 0.5) % 2 === 0);
+      for (const n of CHART) add(n.beat, 'lead', CHORDS[Math.floor(n.beat / 4) % 4].lead[n.lane], n.dur);
+      ev.sort((a, b) => a.t - b.t);
+      return ev;
+    }
+
+    let song = [], idx = 0, start = 0, running = false;
+    function pump() {
+      if (!running) return;
+      const horizon = ac.currentTime + 0.3;
+      while (idx < song.length) {
+        const e = song[idx], at = start + e.t;
+        if (at > horizon) break;
+        if (at >= ac.currentTime - 0.02) I[e.fn](Math.max(at, ac.currentTime), ...e.a);
+        idx++;
+      }
+    }
+    setInterval(pump, 25);
+
+    let lastSong = -Infinity;
+    function songTime() {
+      let t;
+      if (ac.getOutputTimestamp) {
+        const ts = ac.getOutputTimestamp();
+        if (ts.contextTime > 0 && ts.performanceTime > 0) t = ts.contextTime + (performance.now() - ts.performanceTime) / 1000;
+      }
+      if (t === undefined) t = ac.currentTime - (ac.outputLatency || ac.baseLatency || 0);
+      t = t - start - settings.offset / 1000;
+      lastSong = Math.max(lastSong, t);
+      return lastSong;
+    }
+
+    return {
+      async start() {
+        if (!ac) init();
+        if (ac.state !== 'running') await ac.resume();
+        lastSong = -Infinity;
+        newRun();
+        song = buildSong(); idx = 0;
+        start = ac.currentTime + LEAD_IN;
+        running = true;
+        pump();
+      },
+      halt() { running = false; if (out) out.gain.setTargetAtTime(0, ac.currentTime, 0.05); },
+      songTime,
+      tick() {
+        if (!ac || !out) return;
+        const at = ac.currentTime;
+        const o = ac.createOscillator(); o.frequency.value = 1760;
+        o.connect(decayGain(at, 0.05, 0.001, 0.04)).connect(out); o.start(at); o.stop(at + 0.06);
+      },
+    };
+  })();
+
+  // ===== Modes =====
+  const titleWrap = $('#titleWrap'), resultWrap = $('#resultWrap');
+  const ATTRACT_FROM = 20 * 4 * SPB; // attract mode loops from the chorus
+
+  function enterTitle() {
+    audio.halt();
+    S.mode = 'title';
+    newRun(true, true);
+    S.attractT0 = performance.now() / 1000 - ATTRACT_FROM;
+    titleWrap.hidden = false; resultWrap.hidden = true;
+    layoutGoal();
+    $('#startBtn').focus({ preventScroll: true });
+  }
+
+  async function startGame() {
+    titleWrap.hidden = true; resultWrap.hidden = true;
+    S.mode = 'play';
+    newRun(settings.auto, false);
+    layoutGoal();
+    try { await audio.start(); } catch (e) { console.error(e); }
+  }
+
+  function showResult() {
+    audio.halt();
+    S.mode = 'result';
+    const sc = currentScore();
+    const rank = sc >= 980000 ? 'S+' : sc >= 950000 ? 'S' : sc >= 900000 ? 'A' : sc >= 800000 ? 'B' : 'C';
+    $('#resRank').textContent = S.auto ? 'AUTO' : rank;
+    $('#resScore').textContent = fmtScore(sc);
+    $('#resPerfect').textContent = S.counts.perfect;
+    $('#resGreat').textContent = S.counts.great;
+    $('#resGood').textContent = S.counts.good;
+    $('#resMiss').textContent = S.counts.miss;
+    $('#resCombo').textContent = `${S.maxCombo} / ${TOTAL_JUDGES}`;
+    resultWrap.hidden = false;
+    layoutGoal();
+    $('#againBtn').focus({ preventScroll: true });
+  }
+
+  // ===== Input =====
+  const laneByCode = Object.fromEntries(BANDS.map((b, i) => [b.code, i]));
+  window.addEventListener('keydown', (e) => {
+    if (S.mode === 'play') {
+      if (e.code === 'Escape') { enterTitle(); return; }
+      const l = laneByCode[e.code];
+      if (l === undefined || S.auto) return;
+      e.preventDefault();
+      if (e.repeat || S.pressed[l]) return;
+      S.pressed[l] = true;
+      press(l, audio.songTime());
+    } else if (S.mode === 'title' && (e.code === 'Space' || e.code === 'Enter') && !(e.target instanceof HTMLButtonElement)) {
+      e.preventDefault(); startGame();
+    } else if (S.mode === 'result' && e.code === 'Escape') enterTitle();
+  });
+  window.addEventListener('keyup', (e) => {
+    const l = laneByCode[e.code];
+    if (l === undefined || S.mode !== 'play' || S.auto) return;
+    S.pressed[l] = false;
+    release(l, audio.songTime());
+  });
+
+  // Touch: distance from the pivot picks the band.
+  const pointerLane = new Map();
+  cv.addEventListener('pointerdown', (e) => {
+    if (S.mode !== 'play' || S.auto) return;
+    e.preventDefault();
+    const r = Math.hypot(e.clientX - M.px, e.clientY - M.py) / M.len;
+    const l = Math.max(0, Math.min(3, Math.floor((r - BAND_IN) / BAND_W)));
+    pointerLane.set(e.pointerId, l);
+    S.pressed[l] = true;
+    press(l, audio.songTime());
+  });
+  const endPointer = (e) => {
+    const l = pointerLane.get(e.pointerId);
+    if (l === undefined) return;
+    pointerLane.delete(e.pointerId);
+    S.pressed[l] = [...pointerLane.values()].includes(l);
+    if (!S.pressed[l]) release(l, audio.songTime());
+  };
+  cv.addEventListener('pointerup', endPointer);
+  cv.addEventListener('pointercancel', endPointer);
+
+  // Settings UI
+  const offset = $('#offset'), auto = $('#auto');
+  const syncUi = () => {
+    offset.value = settings.offset; $('#offsetOut').textContent = `${settings.offset > 0 ? '+' : ''}${settings.offset} ms`;
+    auto.checked = !!settings.auto;
+  };
+  offset.addEventListener('input', () => { settings.offset = +offset.value; syncUi(); saveSettings(); });
+  auto.addEventListener('change', () => { settings.auto = auto.checked; saveSettings(); });
+  $('#startBtn').addEventListener('click', startGame);
+  $('#againBtn').addEventListener('click', startGame);
+  $('#backBtn').addEventListener('click', enterTitle);
+
+  // ===== Main loop =====
+  let lastFrame = performance.now();
+  function frame(ts) {
+    const dt = Math.min(0.05, (ts - lastFrame) / 1000);
+    lastFrame = ts;
+    let now;
+    if (S.mode === 'play') {
+      now = audio.songTime();
+      if (!isFinite(now)) now = -LEAD_IN;
+    } else {
+      now = ts / 1000 - S.attractT0;
+      if (now > SONG_END - 1) { newRun(true, true); S.attractT0 = ts / 1000 - ATTRACT_FROM; now = ATTRACT_FROM; }
+    }
+    const ease = Math.min(1, dt * 4);
+    for (const k of ['px', 'py', 'len']) M[k] += (MG[k] - M[k]) * ease;
+    M.base = MG.base;
+
+    const beat = now / SPB;
+    const pulse = beat >= 0 && kickBar(Math.floor(beat / 4)) ? Math.exp(-(beat - Math.floor(beat)) * 5) : 0;
+
+    updateJudge(now);
+    drawBackground(beat, pulse);
+    drawFan(beat, now, dt);
+    drawNotes(now);
+    drawArm(now, dt);
+    drawEffects(dt);
+    if (S.mode === 'play') drawHud(now, beat);
+    if (S.mode === 'play' && now > SONG_END) showResult();
+    requestAnimationFrame(frame);
+  }
+
+  window.addEventListener('resize', resize);
+  syncUi();
+  resize();
+  enterTitle();
+  requestAnimationFrame(frame);
+  if (document.fonts && document.fonts.load) document.fonts.load('20px "Dela Gothic One"').catch(() => {});
+  window.__furiko = { S, CHART, startGame };
+})();
+</script>
+</body>
+</html>
