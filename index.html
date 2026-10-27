@@ -4051,6 +4051,370 @@
     };
   });
 
+  // ---------------------------------------------------------------------
+  //  FUKAMI: the dive. You fall down a shaft of light; notes ride the
+  //  shaft walls up out of the depths and are struck as they pass the
+  //  rim. The wall's four coloured stripes spiral like rifling and the
+  //  shaft bends, both baked into depth so you can read them ahead.
+  // ---------------------------------------------------------------------
+  defineMode((kit) => {
+    const { g, rgba, hex, S, TAU, DEG } = kit;
+    const BPM = 150, SPB = 60 / BPM;
+    const theme = { ink: '#03040c', ink2: '#0d1030', panel: 'rgba(3, 4, 12, 0.84)', paper: '#eef0ff', muted: '#9aa0c6', accent: '#4fe3b0' };
+    const INK = hex(theme.ink), INK2 = hex(theme.ink2), PAPER = hex(theme.paper), MUTED = hex(theme.muted);
+    // Four stripes down the shaft wall; keys follow the stripe's colour, wherever it has turned to.
+    const STRIPES = [
+      { label: 'D', name: '珊瑚', color: '#ff6f7d' },
+      { label: 'F', name: '檸檬', color: '#ffe066' },
+      { label: 'J', name: '翡翠', color: '#4fe3b0' },
+      { label: 'K', name: '群青', color: '#5b8cff' },
+    ].map((s) => ({ ...s, rgb: hex(s.color) }));
+    // twist: degrees per beat the stripes turn as you fall (flip: reverses smoothly every 2 bars);
+    // bend: how far the shaft curves away ahead of you.
+    const SECTIONS = [
+      { bar: 0, name: 'INTRO', twist: 0, bend: 0.1, hue: 2 },
+      { bar: 4, name: 'VERSE', twist: 12, bend: 0.25, hue: 3 },
+      { bar: 12, name: 'BUILD', twist: 24, bend: 0.35, hue: 1 },
+      { bar: 20, name: 'CHORUS', twist: 45, bend: 0.5, flip: true, hue: 0 },
+      { bar: 28, name: 'BREAK', twist: -10, bend: 0.8, hue: 3 },
+      { bar: 32, name: 'CHORUS II', twist: 60, bend: 0.55, flip: true, hue: 0 },
+      { bar: 40, name: 'OUTRO', twist: 6, bend: 0.2, hue: 2 },
+    ];
+    const BARS = [
+      '0...1...2...3...', '3...2...1...0...', '0...2...1...3...', 'a-------2...3...',
+      '0...1.2.3...2.1.', '0...3...1...2...', '0.1...2.3...2...', 'b-------0...3...',
+      '3...2.1.0...1.2.', '3...0...2...1...', '3.2...1.0...1...', 'c-------3.2.1.0.',
+      '0.1.2.3.0.1.2.3.', '3.2.1.0.3.2.1.0.', ['0...1...2...3...', '2...3...0...1...'], '0.2.1.3.0.2.1.3.',
+      '0.1.0.1.2.3.2.3.', ['0...0...3...3...', '..1...1...2...2.'], '0.1.2.3.3.2.1.0.', '0.1.2.3.0.1.2.3.',
+      ['0...2...0...2...', '..1...3...1...3.'], 'a-------1.2.3.2.', ['3...1...3...1...', '..2...0...2...0.'], 'd-------0.1.2.3.',
+      '0.1.2.3.0.1.2.3.', ['0...1...2...3...', '3...2...1...0...'], ['b-------........', '....0.3.0.3.2.3.'], '0.1.2.3.3.2.1.0.',
+      'a-------c-------', 'b-------d-------', ['a---------------', '........c-------'], 'd-------0.1.2.3.',
+      '0.2.1.3.0.2.1.3.', ['0...1...2...3...', '2...3...0...1...'], '0.1.2.3.3.2.1.0.', 'c-------1.0.1.0.',
+      ['0...2...0...2...', '..1...3...1...3.'], '3.2.1.0.3.2.1.0.', ['0.0.....3.3.....', '....1.2.....2.1.'], ['0.1.2.3.0.1.2.3.', '........3.....0.'],
+      ['0...............', '3...............'], '1...2...1...2...', ['a---------------', 'd---------------'], '................',
+    ];
+    // F#m - D - A - E. Lead pitch per stripe.
+    const CHORDS = [
+      { pad: [54, 57, 61], bass: 42, lead: [66, 69, 73, 78] },
+      { pad: [54, 57, 62], bass: 38, lead: [66, 69, 74, 78] },
+      { pad: [52, 57, 61], bass: 45, lead: [64, 69, 73, 76] },
+      { pad: [52, 56, 59], bass: 40, lead: [64, 68, 71, 76] },
+    ];
+    const CHART = kit.sortChart(kit.parseLanes(BARS, SPB, 4));
+    const kickBar = (bar) => { const n = SECTIONS[kit.secIndex(SECTIONS, bar)].name; return (n !== 'INTRO' && n !== 'BREAK') || bar === 31; };
+
+    // ----- the shaft: twist (an integral of turning speed) and bend, as functions of beat -----
+    const blend = (beat, f) => {
+      const i = kit.secIndex(SECTIONS, Math.floor(beat / 4));
+      const cur = f(SECTIONS[i], beat);
+      if (i === 0) return cur;
+      const k = (beat - SECTIONS[i].bar * 4) / 2;
+      if (k >= 1) return cur;
+      const prev = f(SECTIONS[i - 1], beat), e = 0.5 - 0.5 * Math.cos(Math.PI * Math.max(0, k));
+      return prev + (cur - prev) * e;
+    };
+    const turnRate = (beat) => blend(beat, (s, b) => s.twist * (s.flip ? Math.cos((Math.PI * (b - s.bar * 4)) / 8) : 1));
+    const STEP = 1 / 16, TOTAL = 44 * 4 + 8;
+    const TWIST = new Float32Array(Math.ceil(TOTAL / STEP) + 2);
+    for (let i = 1; i < TWIST.length; i++) TWIST[i] = TWIST[i - 1] + turnRate((i - 0.5) * STEP) * STEP;
+    function twistAt(beat) {
+      if (beat <= 0) return 0;
+      const f = beat / STEP, i = Math.min(TWIST.length - 2, Math.floor(f));
+      return TWIST[i] + (TWIST[i + 1] - TWIST[i]) * (f - i);
+    }
+    const bendAmp = (beat) => blend(beat, (s) => s.bend);
+    const bendAt = (beat) => { const a = bendAmp(beat); return [a * Math.sin((TAU * beat) / 16), a * 0.6 * Math.sin((TAU * beat) / 11 + 1)]; };
+    // centre of each stripe, in screen degrees, at a moment in the song
+    const stripeAng = (l, t) => -90 + l * 90 + twistAt(t / SPB);
+
+    // ----- projection -----
+    let W = 0, H = 0, VIEW = 1.2;
+    const C = { x: 0, y: 0, r: 1 }, CG = { x: 0, y: 0, r: 1 };
+    const KD = 7; // how fast the shaft shrinks into the distance
+    // the shaft's cross-section at song time t, seen from now: centre and radius
+    function slice(t, now) {
+      // a little behind the rim at most: further back the perspective would flip over
+      const s = Math.max(-0.11, (t - now) / VIEW);
+      const k = 1 / (1 + KD * s);
+      const [bx, by] = bendAt(t / SPB), [nx, ny] = bendAt(now / SPB);
+      const off = (1 - k) * C.r * 0.5;
+      return [C.x + (bx - nx) * off, C.y + (by - ny) * off, C.r * k, k];
+    }
+    const onWall = (t, deg, now, mul = 1) => { const [x, y, r] = slice(t, now); const a = deg * DEG; return [x + Math.cos(a) * r * mul, y + Math.sin(a) * r * mul]; };
+
+    // ----- effects -----
+    const particles = [], flashes = [];
+    function burst(x, y, col, power) {
+      const out = Math.atan2(y - C.y, x - C.x);
+      const n = kit.reduceMotion ? 4 : Math.round(18 * power);
+      for (let i = 0; i < n; i++) {
+        const a = out + (Math.random() - 0.5) * 1.6, v = (200 + Math.random() * 380) * power;
+        particles.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 0, max: 0.25 + Math.random() * 0.3, col, size: 1.5 + Math.random() * 2.5 });
+      }
+    }
+    function drawEffects(dt) {
+      g.globalCompositeOperation = 'lighter';
+      for (let i = flashes.length - 1; i >= 0; i--) {
+        const f = flashes[i]; f.life += dt;
+        if (f.life > 0.3) { flashes.splice(i, 1); continue; }
+        const u = f.life / 0.3, a = stripeAng(f.lane, f.t) * DEG;
+        g.strokeStyle = rgba(STRIPES[f.lane].rgb, 0.8 * (1 - u)); g.lineWidth = 14 * (1 - u) + 2;
+        g.beginPath(); g.arc(C.x, C.y, C.r * (1 + u * 0.08), a - 0.5, a + 0.5); g.stroke();
+      }
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i]; p.life += dt;
+        if (p.life > p.max) { particles.splice(i, 1); continue; }
+        p.x += p.vx * dt; p.y += p.vy * dt;
+        g.strokeStyle = rgba(p.col, 1 - p.life / p.max); g.lineWidth = p.size;
+        g.beginPath(); g.moveTo(p.x, p.y); g.lineTo(p.x - p.vx * 0.03, p.y - p.vy * 0.03); g.stroke();
+      }
+      g.globalCompositeOperation = 'source-over';
+    }
+
+    // streaks rushing past along the wall
+    const streaks = Array.from({ length: kit.reduceMotion ? 0 : 70 }, () => ({ a: Math.random() * 360, s: Math.random() * 1.2 - 0.2, mul: 0.75 + Math.random() * 0.25 }));
+    function drawShaft(now, dt, pulse) {
+      const beat = now / SPB, sec = SECTIONS[kit.secIndex(SECTIONS, Math.max(0, Math.floor(beat / 4)))];
+      g.fillStyle = rgba(INK, 1); g.fillRect(0, 0, W, H);
+      // light far below at the bottom of the shaft
+      const [fx, fy, fr] = slice(now + VIEW * 1.2, now);
+      const deep = g.createRadialGradient(fx, fy, 0, fx, fy, C.r * 0.9);
+      deep.addColorStop(0, rgba(STRIPES[sec.hue].rgb, 0.35 + 0.15 * pulse)); deep.addColorStop(0.25, rgba(INK2, 0.9)); deep.addColorStop(1, rgba(INK, 0));
+      g.fillStyle = deep; g.fillRect(0, 0, W, H);
+      g.fillStyle = rgba(PAPER, 0.9);
+      g.beginPath(); g.arc(fx, fy, Math.max(2, fr * 0.5), 0, TAU); g.fill();
+      // rings: one per beat, brighter on the bar, each cut into the four stripe colours
+      const b0 = Math.ceil(beat - 0.1 * VIEW / SPB), b1 = Math.ceil(beat + VIEW / SPB * 1.15);
+      for (let b = Math.max(0, b0); b <= b1; b++) {
+        const t = b * SPB;
+        const [x, y, r, k] = slice(t, now);
+        if (r < 2) continue;
+        const fade = Math.min(1, (1.15 - (t - now) / VIEW) * 3) * Math.min(1, k * 1.2);
+        for (let l = 0; l < 4; l++) {
+          const a = stripeAng(l, t) * DEG;
+          g.strokeStyle = rgba(STRIPES[l].rgb, (b % 4 === 0 ? 0.5 : 0.24) * fade);
+          g.lineWidth = Math.max(1, (b % 4 === 0 ? 3 : 1.5) * k);
+          g.beginPath(); g.arc(x, y, r, a - Math.PI / 4 + 0.04, a + Math.PI / 4 - 0.04); g.stroke();
+        }
+      }
+      // the stripe borders spiral away down the shaft
+      for (let l = 0; l < 4; l++) {
+        g.strokeStyle = rgba(PAPER, 0.16); g.lineWidth = 1.2;
+        g.beginPath();
+        for (let k = 0; k <= 30; k++) {
+          const t = now + VIEW * (1.15 * (k / 30));
+          const [x, y] = onWall(t, stripeAng(l, t) - 45, now);
+          if (k === 0) g.moveTo(x, y); else g.lineTo(x, y);
+        }
+        g.stroke();
+      }
+      g.globalCompositeOperation = 'lighter';
+      for (const st of streaks) {
+        st.s -= dt * 1.6 / VIEW;
+        if (st.s < 0) { st.s = 1.1; st.a = Math.random() * 360; }
+        const t0 = now + st.s * VIEW, t1 = now + (st.s + 0.06) * VIEW;
+        const [x0, y0] = onWall(t0, st.a, now, st.mul), [x1, y1] = onWall(t1, st.a, now, st.mul);
+        g.strokeStyle = rgba(PAPER, 0.18 * Math.min(1, (1.1 - st.s) * 2)); g.lineWidth = 1.2;
+        g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.stroke();
+      }
+      g.globalCompositeOperation = 'source-over';
+    }
+
+    function drawNotes(now) {
+      const W2 = 26; // half-width of a note tile, in degrees
+      for (let i = S.notes.length - 1; i >= 0; i--) {
+        const n = S.notes[i];
+        if (n.t - now > VIEW * 1.1 || n.end < now - 0.15) continue;
+        const col = STRIPES[n.lane].rgb;
+        const holding = kit.holding(n);
+        if (n.dur > 0 && n.tail === null && n.head !== 'miss') {
+          // hold: a ribbon that follows its stripe as it spirals away
+          const t0 = holding ? now : n.t, t1 = Math.min(n.end, now + VIEW * 1.1);
+          if (t1 > t0) {
+            // sides run down the wall along the stripe; both ends are arcs of the shaft wall
+            const L = [], Rr = [], hw = W2 * 0.7, steps = 48;
+            for (let k = 0; k <= steps; k++) {
+              const t = t0 + ((t1 - t0) * k) / steps, c = stripeAng(n.lane, t);
+              L.push(onWall(t, c - hw, now, 0.95)); Rr.push(onWall(t, c + hw, now, 0.95));
+            }
+            const [nx0, ny0, nr0] = slice(t0, now), [fx1, fy1, fr1] = slice(t1, now);
+            const c0 = stripeAng(n.lane, t0) * DEG, c1 = stripeAng(n.lane, t1) * DEG, hwr = hw * DEG;
+            g.beginPath();
+            L.forEach(([x, y], k) => (k ? g.lineTo(x, y) : g.moveTo(x, y)));
+            g.arc(fx1, fy1, fr1 * 0.95, c1 - hwr, c1 + hwr);
+            for (let k = Rr.length - 1; k >= 0; k--) g.lineTo(Rr[k][0], Rr[k][1]);
+            g.arc(nx0, ny0, nr0 * 0.95, c0 + hwr, c0 - hwr, true);
+            g.closePath();
+            g.fillStyle = rgba(col, holding ? 0.55 : 0.32); g.fill();
+            g.strokeStyle = rgba(col, 0.9); g.lineWidth = 1.5; g.stroke();
+          }
+        }
+        if (n.head || n.t < now - 0.15) continue;
+        // a glowing tile on the wall, rushing up out of the depths
+        const [x, y, r, k] = slice(n.t, now);
+        const c = stripeAng(n.lane, n.t) * DEG, w = W2 * DEG;
+        const appear = Math.min(1, (VIEW * 1.1 - (n.t - now)) / (VIEW * 0.2));
+        g.globalAlpha = appear;
+        g.beginPath();
+        g.arc(x, y, r, c - w, c + w);
+        g.arc(x, y, r * 0.86, c + w, c - w, true);
+        g.closePath();
+        g.globalCompositeOperation = 'lighter';
+        g.strokeStyle = rgba(col, 0.35); g.lineWidth = Math.max(2, 14 * k); g.stroke();
+        g.globalCompositeOperation = 'source-over';
+        g.fillStyle = rgba(col, 0.95); g.fill();
+        g.strokeStyle = rgba(PAPER, 0.85); g.lineWidth = Math.max(1, 2 * k);
+        g.beginPath(); g.arc(x, y, r * 0.93, c - w * 0.7, c + w * 0.7); g.stroke();
+        g.globalAlpha = 1;
+      }
+    }
+
+    function drawRim(now) {
+      // the rim you are falling past: four arcs in the stripes' colours, wherever they have turned to
+      for (let l = 0; l < 4; l++) {
+        const col = STRIPES[l].rgb, a = stripeAng(l, now) * DEG;
+        const down = S.pressed[l] || S.autoHold[l] > now;
+        g.globalCompositeOperation = 'lighter';
+        g.strokeStyle = rgba(col, 0.25 + (down ? 0.35 : 0) + 0.4 * S.flash[l]); g.lineWidth = 18;
+        g.beginPath(); g.arc(C.x, C.y, C.r, a - Math.PI / 4 + 0.05, a + Math.PI / 4 - 0.05); g.stroke();
+        g.globalCompositeOperation = 'source-over';
+        g.strokeStyle = rgba(col, 1); g.lineWidth = down ? 7 : 5;
+        g.stroke();
+        const lx = C.x + Math.cos(a) * (C.r - 30), ly = C.y + Math.sin(a) * (C.r - 30);
+        g.fillStyle = down ? rgba(col, 0.6) : rgba(INK, 0.75);
+        g.beginPath(); g.arc(lx, ly, 15, 0, TAU); g.fill();
+        g.strokeStyle = rgba(col, 1); g.lineWidth = 2; g.stroke();
+        g.fillStyle = rgba(PAPER, 0.95);
+        g.font = '15px "Dela Gothic One", sans-serif';
+        g.textAlign = 'center'; g.textBaseline = 'middle';
+        g.fillText(STRIPES[l].label, lx, ly + 1);
+      }
+    }
+
+    const GRADE_COLOR = { perfect: PAPER, great: STRIPES[1].rgb, good: STRIPES[2].rgb, miss: MUTED };
+    function drawCentre(now) {
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      if (S.combo >= 5) {
+        g.fillStyle = rgba(PAPER, 0.2);
+        g.font = `${Math.round(C.r * 0.2)}px "Dela Gothic One", sans-serif`;
+        g.fillText(String(S.combo), C.x, C.y - C.r * 0.3);
+      }
+      if (S.popup && now - S.popup.t <= 0.5) {
+        const age = now - S.popup.t, k = 1 + 0.3 * Math.max(0, 1 - age * 8);
+        g.save();
+        g.translate(C.x, C.y + C.r * 0.3); g.scale(k, k);
+        g.globalAlpha = Math.min(1, (0.5 - age) * 5);
+        g.font = `${Math.round(Math.min(26, C.r * 0.07))}px "Dela Gothic One", sans-serif`;
+        g.fillStyle = rgba(GRADE_COLOR[S.popup.grade], 1);
+        g.fillText(S.popup.grade.toUpperCase(), 0, 0);
+        g.restore();
+      }
+    }
+
+    return {
+      id: 'fukami', name: 'FUKAMI', kind: 'ダイブ', kana: '深み ・ ダイブ（奥行き落下）',
+      blurb: '光の縦穴を落ちていく。壁を這い上がってくるノーツが縁を通過する瞬間に叩く。壁の色の帯はねじれる。',
+      lede: '光の縦穴を真っ逆さまに落ちていきます。ノーツは穴の壁に乗って深みから迫ってきて、<strong>手前の縁を通過する瞬間</strong>に叩きます。壁は4色の帯に分かれていて、キーは帯の色に対応します。帯は落ちるほどねじれ、穴は曲がります。',
+      keys: STRIPES.map((s) => ({ label: s.label, name: s.name, color: s.color })),
+      touchHint: 'スマホは縁の色の部分をタップ',
+      meta: 'BPM 150 ・ 44小節 ・ 約1分10秒 ・ 帯のねじれと穴の曲がりは奥まで見えるので、先読みできます。',
+      theme, comboOwn: true, attractFromBar: 20,
+      bpm: BPM, bars: 44, sections: SECTIONS, chords: CHORDS, chart: CHART,
+      laneCodes: [['KeyD'], ['KeyF'], ['KeyJ'], ['KeyK']],
+      // the direction of the tap from the centre picks the stripe that is there now
+      touchLane(x, y, now) {
+        const a = Math.atan2(y - C.y, x - C.x) / DEG;
+        for (let l = 0; l < 4; l++) {
+          const d = ((a - stripeAng(l, now)) % 360 + 540) % 360 - 180;
+          if (Math.abs(d) <= 45) return l;
+        }
+        return -1;
+      },
+      progressColor: (beat) => rgba(STRIPES[SECTIONS[kit.secIndex(SECTIONS, Math.max(0, Math.floor(beat / 4)))].hue].rgb, 0.9),
+      song: {
+        bass: { wave: 'sawtooth', subShift: -12, q: 7, open: 1700, close: 260 },
+        pad: { wave: 'sawtooth', cutoff: 1400, level: 0.045, detune: 12, attack: 0.25 },
+        delay: { beats: 0.75, feedback: 0.3, mix: 0.22 }, leadLevel: 0.45, leadSend: 0.35, padBus: 0.8,
+        leadMidi: (n) => CHORDS[Math.floor(n.beat / 4) % 4].lead[n.lane],
+        // Supersaw stab: three detuned saws through a filter that snaps shut.
+        lead(A, at, midi, dur) {
+          const { ac } = A, f0 = A.mtof(midi);
+          const f = ac.createBiquadFilter(); f.type = 'lowpass'; f.Q.value = 3;
+          f.frequency.setValueAtTime(5200, at); f.frequency.exponentialRampToValueAtTime(1100, at + 0.18);
+          const gn = ac.createGain();
+          gn.gain.setValueAtTime(0.0001, at); gn.gain.exponentialRampToValueAtTime(0.13, at + 0.004);
+          if (dur < 0.3) gn.gain.exponentialRampToValueAtTime(0.0001, at + 0.3);
+          else { gn.gain.exponentialRampToValueAtTime(0.06, at + 0.15); gn.gain.setValueAtTime(0.06, at + dur); gn.gain.exponentialRampToValueAtTime(0.0001, at + dur + 0.25); }
+          f.connect(gn).connect(A.bus.lead);
+          const end = at + Math.max(0.35, dur + 0.3);
+          for (const det of [-14, 0, 14]) {
+            const o = ac.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f0; o.detune.value = det;
+            o.connect(f); o.start(at); o.stop(end);
+          }
+        },
+        arrange(add, bar, b0, ch, name) {
+          if (name === 'INTRO') {
+            if (bar >= 2) for (let i = 0; i < 8; i++) add(b0 + i / 2, 'hat', false);
+          } else if (name === 'VERSE') {
+            for (let i = 0; i < 4; i++) { add(b0 + i, 'kick'); add(b0 + i + 0.5, 'hat', false); add(b0 + i + 0.5, 'bass', ch.bass, SPB * 0.45); }
+          } else if (name === 'BUILD') {
+            for (let i = 0; i < 4; i++) { add(b0 + i, 'kick'); add(b0 + i + 0.5, 'bass', ch.bass, SPB * 0.45); }
+            for (let i = 0; i < 16; i++) add(b0 + i / 4, 'hat', false);
+            if (bar === 19) for (let i = 8; i < 16; i++) add(b0 + i / 4, 'snare');
+            else { add(b0 + 1, 'snare'); add(b0 + 3, 'snare'); }
+          } else if (name === 'CHORUS' || name === 'CHORUS II') {
+            if (bar % 4 === 0) add(b0, 'crash');
+            for (let i = 0; i < 4; i++) {
+              add(b0 + i, 'kick');
+              add(b0 + i + 0.25, 'bass', ch.bass, SPB * 0.2); add(b0 + i + 0.5, 'bass', ch.bass + 12, SPB * 0.2); add(b0 + i + 0.75, 'bass', ch.bass, SPB * 0.2);
+              add(b0 + i + 0.5, 'hat', true);
+            }
+            add(b0 + 1, 'snare'); add(b0 + 3, 'snare');
+          } else if (name === 'BREAK') {
+            add(b0, 'bass', ch.bass, SPB * 3.5);
+            for (let i = 0; i < 4; i++) add(b0 + i + 0.5, 'hat', false);
+            if (bar === 31) { for (let i = 0; i < 4; i++) add(b0 + i, 'kick'); for (let i = 8; i < 16; i++) add(b0 + i / 4, 'snare'); }
+          } else if (name === 'OUTRO') {
+            if (bar === 40) add(b0, 'crash');
+            if (bar <= 41) { add(b0, 'kick'); add(b0 + 2, 'kick'); }
+            if (bar === 42) add(b0, 'bass', ch.bass, SPB * 4);
+          }
+        },
+      },
+      layout(w, h, snap) {
+        W = w; H = h;
+        let x0 = 0;
+        if (kit.wide()) x0 = Math.max(W * 0.42, 560);
+        const aw = W - x0;
+        CG.x = x0 + aw / 2; CG.y = H * 0.52;
+        CG.r = Math.min(aw * 0.46, H * 0.44);
+        if (snap) Object.assign(C, CG);
+      },
+      update(now, dt) {
+        VIEW = kit.view(1.2);
+        const k = Math.min(1, dt * 4);
+        for (const key of ['x', 'y', 'r']) C[key] += (CG[key] - C[key]) * k;
+      },
+      draw(now, dt) {
+        const beat = now / SPB;
+        const pulse = kit.pulse(beat, kickBar(Math.floor(beat / 4)));
+        drawShaft(now, dt, pulse);
+        if (kit.playing()) drawCentre(now);
+        drawNotes(now);
+        drawRim(now);
+        drawEffects(dt);
+      },
+      onJudge(n, grade, now) {
+        if (grade === 'miss') return;
+        const a = stripeAng(n.lane, now) * DEG;
+        burst(C.x + Math.cos(a) * C.r, C.y + Math.sin(a) * C.r, STRIPES[n.lane].rgb, grade === 'perfect' ? 1 : 0.6);
+        flashes.push({ lane: n.lane, t: now, life: 0 });
+        S.flash[n.lane] = 1;
+      },
+      onNewRun() { particles.length = 0; flashes.length = 0; },
+    };
+  });
+
   // =====================================================================
   //  BOOT
   // =====================================================================
