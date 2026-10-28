@@ -17,7 +17,7 @@
 - `minamo` MINAMO（広がる円）：広がる波紋が、待っているノーツに届く瞬間に狙って叩く。マウス + Z / X、またはタップ
 - `furiko` FURIKO（振り子判定線）：メトロノームの振り子が帯の上のノーツを通過する瞬間。D F J K
 - `hasami` HASAMI（閉じる 2 本線）：両側から近づく 2 本の線が重なる瞬間。D F J K
-- `tomoshi` TOMOSHI（自分で動かす判定線）：動かない提灯に、自分で動かす光の柱を重ねて灯す。マウスで柱を動かし、段のキー D F J K（スマホは提灯をタップ）
+- `tomoshi` TOMOSHI（自分で動かす判定線）：動かない提灯に、自分で動かす光の柱を重ねておくだけで灯る（キーもタップも不要）。マウスか指で柱を動かす
 - `fukami` FUKAMI（ダイブ）：光の縦穴を落ちながら、壁を這い上がってくるノーツが手前の縁を通過する瞬間に叩く。壁の 4 色の帯はねじれ、穴は曲がる。キーは帯の色。D F J K
 
 ## ファイルの中身
@@ -35,10 +35,12 @@
 ブロックが返すオブジェクトに必要なもの：
 
 - **表示**：`id`（URL の `#` に使う）、`name`、`kind`（取り方の名前）、`kana`、`blurb`（一覧の 1 行説明）、`lede`（タイトル画面の説明、HTML 可）、`keys`（`{ label, name, color }` の配列）、`touchHint`、`meta`、`theme`（`ink` `ink2` `panel` `paper` `muted` `accent`）。
+- **譜面の考え方**：4 レーンの形式は共通の譜面 `kit.std4()` を使います。階段（0123 / 3210）、交互（0101・2323）、左右交互（0213）、外と内の同時押し（[0,3] → [1,2]）、片手の長押し＋もう片手のタップを、4 小節ずつ呼びかけと応答になるように並べてあります。形式に合わない小節だけ `kit.std4({ 小節番号: パターン })` で差し替えます。
+- **同時押し**：同じ瞬間のノーツには `note.chord` が付きます。描くときに位置を集めて `kit.chordLines(位置の配列, 色)` を呼ぶと、同時押しをつなぐ線が引かれます。
 - **曲と譜面**：`bpm`、`bars`、`sections`（`{ bar, name }`）、`chords`（`{ pad, bass, lead }`）、`chart`（ノーツの配列。最低限 `beat` `t` `dur` と、キー入力なら `lane`）、`attractFromBar`（タイトル画面のデモを始める小節）。
   - レーン型の譜面は `kit.parseLanes(BARS, SPB, レーン数)` で、1 小節 16 文字の文字列から作れます（`0`〜`5` がタップ、`a`〜`f` と `-` が長押し）。作ったら `kit.sortChart(chart)`。
 - **音**：`song.arrange(add, bar, b0, ch, name)` でドラムやベースを並べ、`song.lead(A, at, midi, dur)` でリードの音色、`song.leadMidi(note)` でノーツごとの音程を決めます。`song.bass` `song.pad` `song.delay` で共通の音色を調整できます。
-- **入力**：キーで叩く形式は `laneCodes`（レーンごとのキーコード配列）と `touchLane(x, y, now)`。押したときに追加の条件を付けたいときは `laneAccept(note, now)`、長押し中の条件は `holdCheck(note, now)`、マウスカーソルを隠すなら `hideCursor: true`（マウスや指の位置は `kit.S.aim`）。位置を狙う形式は `input: 'aim'` と `hitTest(note, x, y)`・`followPos(note, now)`・`followReach()`。
+- **入力**：キーで叩く形式は `laneCodes`（レーンごとのキーコード配列）と `touchLane(x, y, now)`。押したときに追加の条件を付けたいときは `laneAccept(note, now)`、長押し中の条件は `holdCheck(note, now)`、マウスカーソルを隠すなら `hideCursor: true`（マウスや指の位置は `kit.S.aim`）。位置を狙う形式は `input: 'aim'` と `hitTest(note, x, y)`・`followPos(note, now)`・`followReach()`。押す操作がない形式は `input: 'line'` と `lineOn(note, now)`（その瞬間に線がノーツ上にあれば取れる）。
 - **描画**：`layout(W, H, snap)`、`update(now, dt)`、`draw(now, dt)`、`onJudge(note, grade, now)`、`onNewRun()`。画面左のパネルを避けたいときは `kit.wide()` を見ます。スコアと進行バーはエンジンが描きます。コンボを自分で描く形式は `comboOwn: true`。
 
 `kit` には描画コンテキスト `g`、実行中の状態 `S`（`notes` `pressed` `autoHold` `flash` `combo` `popup` など）、`rgba` `hex` `mulberry32` `secIndex` `pulse` `view` `holding` `runOf` などの道具が入っています。

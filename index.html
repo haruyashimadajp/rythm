@@ -221,6 +221,36 @@
   let M = null; // the mode on screen
   const byChart = new Map(); // chart note -> this run's note
 
+  // The shared 4-lane chart: 44 bars in the same section layout as every song here
+  // (INTRO 0-3, VERSE 4-11, BUILD 12-19, CHORUS 20-27, BREAK 28-31, CHORUS II 32-39, OUTRO 40-43).
+  // Built from patterns players recognise, in 4-bar phrases that answer each other:
+  // stairs (0123 / 3210), trills (0101, 2323), hand alternation (0213), mirrored chords
+  // ([0,3] then [1,2]) and a hold in one hand while the other hand taps.
+  const STAIRS_UP = '0.1.2.3.0.1.2.3.', STAIRS_DOWN = '3.2.1.0.3.2.1.0.';
+  const STD4 = [
+    // INTRO: quarter-note stairs, then a two-hand chord
+    '0...1...2...3...', '3...2...1...0...', '0...1...2...3...', ['0.......0.......', '3.......3.......'],
+    // VERSE: call (stairs up) and answer (stairs down), then trills; the second half mirrors the first
+    '0.1.2.3.........', '3.2.1.0.........', '0.1.0.1.2.3.2.3.', ['a-------........', '....2.3.2.3.....'],
+    '3.2.1.0.........', '0.1.2.3.........', '3.2.3.2.1.0.1.0.', ['d-------........', '....1.0.1.0.....'],
+    // BUILD: hand alternation, mirrored chords, a mountain, then a 16th-note stair fill
+    '0.2.1.3.0.2.1.3.', '3.1.2.0.3.1.2.0.', ['0...1...0...1...', '3...2...3...2...'], '0.1.2.3.3.2.1.0.',
+    '0.2.1.3.0.2.1.3.', '3.1.2.0.3.1.2.0.', ['0...1...2...3...', '3...2...1...0...'], '0.1.2.3.01230123',
+    // CHORUS: outer chord with inner steps, stairs, trills, a hold under a trill
+    ['0.......0.......', '3.......3.......', '....1.2.....2.1.'], STAIRS_UP,
+    ['0.......0.......', '3.......3.......', '....2.1.....1.2.'], STAIRS_DOWN,
+    '0.1.0.1.2.3.2.3.', '3.2.3.2.1.0.1.0.', ['b-------........', '....3.2.3.2.....'], '3.2.1.0.3210....',
+    // BREAK: holds passed from hand to hand
+    ['a-------........', '........d-------'], ['b-------........', '........c-------'],
+    ['a-------........', '....2...3...2...'], ['d-------........', '........0.1.2.3.'],
+    // CHORUS II: the chorus again, busier inside the chords
+    ['0.......0.......', '3.......3.......', '..1.2.1...2.1.2.'], '0.2.1.3.0.2.1.3.',
+    ['3.......3.......', '0.......0.......', '..2.1.2...1.2.1.'], '3.1.2.0.3.1.2.0.',
+    '0.1.2.3.3.2.1.0.', '0.1.0.1.2.3.2.3.', ['0...1...2...3...', '3...2...1...0...'], '0.1.2.3.01230123',
+    // OUTRO
+    ['0...............', '3...............'], '1...2...1...2...', ['a---------------', 'd---------------'], '................',
+  ];
+
   // What a mode gets to work with.
   const kit = {
     g, rgba, hex, mulberry32, TAU, DEG, S, settings, reduceMotion, WIN,
@@ -264,6 +294,23 @@
       return out;
     },
     sortChart: (chart) => chart.sort((a, b) => a.t - b.t || (a.lane ?? 0) - (b.lane ?? 0)),
+    // The shared 4-lane chart (see STD4 below), optionally with some bars swapped out.
+    std4(overrides = {}) { return STD4.map((bar, i) => (i in overrides ? overrides[i] : bar)); },
+    // Simultaneous notes get a bar joining them, as in most lane games. Modes collect the screen
+    // position of each chord note they draw ({ t, x, y, a }) and hand the list over here.
+    chordLines(points, col) {
+      points.sort((p, q) => p.t - q.t || p.x - q.x);
+      g.lineCap = 'round';
+      for (let i = 0; i < points.length - 1; i++) {
+        const p = points[i], q = points[i + 1];
+        if (Math.abs(p.t - q.t) > 1e-3) continue;
+        const a = Math.min(p.a ?? 1, q.a ?? 1);
+        g.strokeStyle = rgba(col, 0.28 * a); g.lineWidth = 8;
+        g.beginPath(); g.moveTo(p.x, p.y); g.lineTo(q.x, q.y); g.stroke();
+        g.strokeStyle = rgba(col, 0.9 * a); g.lineWidth = 2.5;
+        g.stroke();
+      }
+    },
     // a soft kick pulse: 1 on the beat, fading through it
     pulse(beat, on) { return beat >= 0 && on ? Math.exp(-(beat - Math.floor(beat)) * 5) : 0; },
     roundRect(x, y, w, h, r) { g.beginPath(); if (g.roundRect) g.roundRect(x, y, w, h, r); else g.rect(x, y, w, h); },
@@ -274,6 +321,10 @@
     m.spb = 60 / m.bpm;
     m.songEnd = m.bars * 4 * m.spb + 0.8;
     m.totalJudges = m.chart.reduce((n, c) => n + (c.dur > 0 ? 2 : 1), 0);
+    // mark notes that share their moment with another note
+    const at = new Map();
+    for (const c of m.chart) { const k = Math.round(c.t * 1000); at.set(k, (at.get(k) || 0) + 1); }
+    for (const c of m.chart) c.chord = at.get(Math.round(c.t * 1000)) > 1;
     m.input = m.input || 'lanes';
     MODES.push(m);
   }
@@ -292,6 +343,7 @@
     keyDown.clear(); pointerLane.clear(); aimPointers.clear();
     if (M.onNewRun) M.onNewRun();
     cv.classList.toggle('aiming', (M.input === 'aim' || M.hideCursor) && !auto && !attract);
+    linePointers.clear();
   }
 
   function judge(n, grade, now) {
@@ -339,6 +391,11 @@
         n.head = 'perfect'; judge(n, 'perfect', now);
         if (n.lane !== undefined) S.autoHold[n.lane] = Math.max(S.autoHold[n.lane], n.dur > 0 ? n.end : now + 0.08);
         if (n.dur > 0) n.holding = 'auto';
+      }
+      // line modes: nothing to press; the note is taken if the line is on it at (or just after) its moment
+      if (M.input === 'line' && !S.auto && !n.head && now >= n.t && now - n.t <= WIN.good && M.lineOn(n, now)) {
+        n.head = gradeOf(now - n.t); judge(n, n.head, now);
+        if (n.dur > 0) n.holding = 'line';
       }
       if (!n.head && now - n.t > WIN.good) {
         n.head = 'miss'; judge(n, 'miss', now);
@@ -710,6 +767,7 @@
   const keyDown = new Set();
   const pointerLane = new Map();
   const aimPointers = new Map();
+  const linePointers = new Set();
   const laneOfCode = (code) => (M.laneCodes ? M.laneCodes.findIndex((codes) => codes.includes(code)) : -1);
   const syncPressed = (l) => { S.pressed[l] = M.laneCodes[l].some((c) => keyDown.has(c)) || [...pointerLane.values()].includes(l); };
   const aimOf = (token) => aimPointers.get(token) || S.aim;
@@ -753,12 +811,13 @@
   window.addEventListener('pointermove', (e) => {
     if (e.pointerType === 'mouse') { S.aim.x = e.clientX; S.aim.y = e.clientY; S.touch = false; }
     else if (aimPointers.has(e.pointerId)) aimPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    else if (pointerLane.has(e.pointerId)) { S.aim.x = e.clientX; S.aim.y = e.clientY; }
+    else if (pointerLane.has(e.pointerId) || linePointers.has(e.pointerId)) { S.aim.x = e.clientX; S.aim.y = e.clientY; }
   });
   cv.addEventListener('pointerdown', (e) => {
     if (!playing()) return;
     e.preventDefault();
     const now = audio.songTime();
+    if (M.input === 'line') { S.aim.x = e.clientX; S.aim.y = e.clientY; S.touch = e.pointerType !== 'mouse'; linePointers.add(e.pointerId); return; }
     if (M.input === 'aim') {
       if (e.pointerType === 'mouse') { S.aim.x = e.clientX; S.aim.y = e.clientY; pressAim('mouse', now); return; }
       S.touch = true;
@@ -774,6 +833,7 @@
     if (!was) pressLane(l, now);
   });
   const endPointer = (e) => {
+    linePointers.delete(e.pointerId);
     if (S.screen !== 'play') return;
     if (M.input === 'aim') {
       if (e.pointerType === 'mouse') release('mouse', audio.songTime());
@@ -845,7 +905,9 @@
   //  block, give it a new id, and fill in: meta (name, keys, text), theme,
   //  bpm / bars / sections / chords / chart, song (arrange, lead voice),
   //  input (laneCodes + touchLane, optionally laneAccept / holdCheck /
-  //  hideCursor; or input: 'aim' + hitTest/followPos/followReach),
+  //  hideCursor; or input: 'aim' + hitTest/followPos/followReach; or
+  //  input: 'line' + lineOn(note, now) for modes with nothing to press),
+  //  chords: notes sharing a moment have note.chord; draw kit.chordLines,
   //  and layout / update / draw / onJudge / onNewRun.
   // =====================================================================
 
@@ -874,21 +936,7 @@
       { bar: 32, name: 'CHORUS II', sway: 0.65, wave: 0.6, hue: 0 },
       { bar: 40, name: 'OUTRO', sway: 0.3, wave: 0.3, hue: 2 },
     ];
-    const BARS = [
-      '0...1...2...3...', '0...1...2...3...', '3...2...1...0...', '0...0...3...3...',
-      '0...2...1...3...', '0.1.2...3.2.1...', '0...2...1...3...', 'a-------3...2...',
-      '1...3...0...2...', '1.0.3...2.3.0...', '1...3...0...2...', 'd-------0.1.2.3.',
-      '0.2.1.3.0.2.1.3.', '0...0.1.2...2.3.', '3.1.2.0.3.1.2.0.', '3...3.2.1...1.0.',
-      ['0...1...2...3...', '2...3...0...1...'], '0.1.2.3.3.2.1.0.',
-      ['0...1...2...3...', '3...2...1...0...'], '0.1.2.3.01230123',
-      '0.1.2.3.2.1.0.1.', 'b-------3.2.3.0.', '3.2.1.0.1.2.3.2.', 'c-------0.1.0123',
-      ['0...0...0...0...', '..2...3...2...1.'], '1.3.0.2.1.3.0.2.',
-      ['a-------........', '....2.3.1.3.2.3.'], '0123..3210..0.3.',
-      'a-------c-------', 'b-------d-------', ['a---------------', '........c-------'], 'd-------0.1.2.3.',
-      '0.2.1.3.0.2.1.3.', '0.1.0.1.2.3.2.3.', ['0...1...2...3...', '2...3...0...1...'], '0.1.2.3.01233210',
-      '3.2.1.0.3.2.1.0.', 'c-------0.1.0.1.', '0.3.1.2.0.3.1.2.', ['0.1.2.3.0.1.2.3.', '........3.....0.'],
-      ['0...............', '3...............'], '1...2...1...2...', ['a---------------', 'd---------------'], '................',
-    ];
+    const BARS = kit.std4();
     // Braid moves: [bar, beat, lengthInBeats, type, a, b]. Slots are screen positions 0-3.
     const BRAIDS = [
       [2, 0, 2, 'swap', 1, 2], [5, 2, 2, 'swap', 0, 1], [7, 0, 2, 'swap', 2, 3], [9, 2, 2, 'cycle', 1],
@@ -1128,6 +1176,7 @@
     function drawNotes(now) {
       const tMin = now + ZMIN * VIEW, tMax = now + ZMAX * VIEW;
       const Q = { x: 0, y: 0, s: 1, d: 0 };
+      const chords = [];
       for (let i = S.notes.length - 1; i >= 0; i--) {
         const n = S.notes[i];
         if (n.t > tMax || n.end < tMin) continue;
@@ -1152,6 +1201,7 @@
         if (n.head || n.t < tMin) continue;
         laneAt(n.lane, n.t, now, Q);
         const x = Q.x, y = Q.y, s = Q.s, d = Q.d;
+        if (n.chord) chords.push({ t: n.t, x, y });
         laneAt(n.lane, n.t + 0.03, now, P);
         const ang = Math.atan2(P.y - y, P.x - x) + Math.PI / 2;
         const w = L.laneW * 1.3 * s * (1 + 0.2 * d), h = Math.max(6, L.sp * 0.14 * s);
@@ -1168,6 +1218,7 @@
         kit.roundRect(-w * 0.36, -h * 0.14, w * 0.72, h * 0.28, h * 0.14); g.fill();
         g.restore();
       }
+      kit.chordLines(chords, PAPER);
     }
     function drawFog() {
       const y1 = yOf(0.6);
@@ -1389,18 +1440,29 @@
       { bar: 32, name: 'CHORUS II', spin: 18, hue: 0 },
       { bar: 40, name: 'OUTRO', spin: 5, hue: 4 },
     ];
+    // Patterns follow the shape: stairs run around the polygon (a turn of the gate), chords take
+    // opposite edges, and trills bounce between opposite edges. Only edges open at that moment are used:
+    // triangle F J K (2-4), square D-K (1-4), pentagon D-L (1-5), hexagon all (0-5).
     const BARS = [
-      '2...3...4...3...', '2...3...4...3...', '2...2...4...4...', '2.3.4...3...2...',
-      '1...2...3...4...', '1.2.3...4.3.2...', '4...3...2...1...', 'b-------1...4...',
-      '1...3...2...4...', '1.3.2...4.2.3...', '2...4...1...3...', 'c-------1.2.3.4.',
-      '1.3.5.2.4.1.3.5.', '5...4.3.2...1.2.', '1.2.3.4.5.4.3.2.', ['1...3...5...3...', '........e-------'],
-      '0.1.2.3.4.5.4.3.', ['0...2...4...0...', '3...5...1...3...'], '5.4.3.2.1.0.1.2.', '0.2.4.1.3.012345',
-      '0.1.2.3.4.5.3.0.', 'a-------3.4.5.4.', ['0...2...4...0...', '..3...5...1...3.'], 'f-------0.1.2.3.',
-      '0.3.1.4.2.5.0.3.', ['0...3...1...4...', '2...5...2...5...'], '5.4.3.2.1.0.5.4.', '012345..543210..',
+      // INTRO (triangle): walk round the three edges and back
+      '2...3...4.......', '4...3...2.......', '2.3.4...2.3.4...', '4.3.2...3...3...',
+      // VERSE (square): stairs round and back, trills on neighbouring edges, a hold under the other hand
+      '1.2.3.4.........', '4.3.2.1.........', '1.2.1.2.3.4.3.4.', ['b-------........', '....3.4.3.4.....'],
+      '1.2.3.4.........', '4.3.2.1.........', '4.3.4.3.2.1.2.1.', ['e-------........', '....1.2.1.2.....'],
+      // BUILD (pentagon, then hexagon): longer turns, chords, and a full-circle fill
+      '1.2.3.4.5.......', '5.4.3.2.1.......', ['1...2...3.......', '4...5...1.......'], '1.2.3.4.5.4.3.2.',
+      '0.1.2.3.4.5.....', '5.4.3.2.1.0.....', ['0...1...2.......', '3...4...5.......'], '0.1.2.3.012345..',
+      // CHORUS (hexagon): opposite-edge chords with a short turn between, full turns, opposite-edge trills
+      ['0.......3.......', '3.......0.......', '..1.2.....4.5...'], '0.1.2.3.4.5.0.1.',
+      ['1.......4.......', '4.......1.......', '..2.3.....5.0...'], '5.4.3.2.1.0.5.4.',
+      '0.3.0.3.1.4.1.4.', '2.5.2.5.0.3.0.3.', ['a-------........', '....2.4.2.4.....'], '0.1.2.3.4.5.....',
+      // BREAK (triangle): holds handed round the three edges
       'c-------d-------', 'e-------c-------', ['c---------------', '........e-------'], 'd-------2.3.4.3.',
+      // CHORUS II (square, hexagon, pentagon, hexagon)
       '1.2.3.4.1.2.3.4.', ['1...2...3...4...', '3...4...1...2...'], '0.1.2.3.4.5.0.1.', '0.3.1.4.2.5.0.3.',
-      '1.2.3.4.5.4.3.2.', 'b-------5.4.3.2.', '0.2.4.0.1.3.5.1.', ['0...2...4...0...', '3...5...1...3...'],
-      '2...3...4...3...', '2...4...3...4...', ['c---------------', 'e---------------'], '................',
+      '1.2.3.4.5.4.3.2.', ['b-------........', '....5.4.3.2.....'], '0.2.4.1.3.5.0.3.', ['0...2...4...0...', '3...5...1...3...'],
+      // OUTRO (back to the triangle)
+      '2...3...4...3...', '4...3...2...3...', ['c---------------', 'e---------------'], '................',
     ];
     // Shape morphs: [bar, beat, lengthInBeats, shape]. The song starts as a triangle.
     const MORPHS = [
@@ -1559,6 +1621,7 @@
     }
     function drawNotes(now) {
       const tMax = now + VIEW * 1.02, tMin = now - 0.12;
+      const chords = [];
       g.lineCap = 'round';
       for (let i = S.notes.length - 1; i >= 0; i--) {
         const n = S.notes[i];
@@ -1578,6 +1641,7 @@
         const z = (n.t - now) / VIEW;
         const fade = Math.min(1, (1.02 - z) * 6);
         const p = edgePts(n.lane, radiusAt(z), 0.08, n.landing);
+        if (n.chord) chords.push({ t: n.t, x: (p[0] + p[2]) / 2, y: (p[1] + p[3]) / 2, a: Math.max(0, fade) });
         g.globalAlpha = Math.max(0, fade);
         g.globalCompositeOperation = 'lighter';
         g.strokeStyle = rgba(col, 0.3); g.lineWidth = 16;
@@ -1589,6 +1653,7 @@
         g.beginPath(); g.moveTo(p[0], p[1]); g.lineTo(p[2], p[3]); g.stroke();
         g.globalAlpha = 1;
       }
+      kit.chordLines(chords, PAPER);
     }
     function drawGate(now) {
       const R = radiusAt(0);
@@ -1979,6 +2044,7 @@
     }
     function drawBalls(now) {
       const r = ballR();
+      const chords = [];
       const clampIn = ([x, y]) => [Math.min(R.x + R.w - r, Math.max(R.x + r, x)), Math.min(R.y + R.h - r, Math.max(R.y + r, y))];
       for (const ball of BALLS) {
         if (now < ball.first - VIEW || now > ball.last + 1.2) continue;
@@ -2012,6 +2078,7 @@
         // where it will strike next, and the bounce after that
         if (target && target.t - now < VIEW) {
           const tp = px(target.p), bp = clampIn(px(pos));
+          if (target.note.chord) chords.push({ t: target.t, x: tp[0], y: tp[1], a: alpha });
           const k = Math.max(0, Math.min(1, (target.t - now) / (VIEW * 0.75)));
           g.setLineDash([4, 6]);
           g.strokeStyle = rgba(col, 0.28 * alpha); g.lineWidth = 1.5;
@@ -2060,6 +2127,10 @@
         g.beginPath(); g.arc(bx - r * 0.25, by - r * 0.25, r * 0.38, 0, Math.PI * 2); g.fill();
         g.globalAlpha = 1;
       }
+      // two balls striking at the same moment: join their target marks
+      g.setLineDash([6, 6]);
+      kit.chordLines(chords, PAPER);
+      g.setLineDash([]);
     }
     const GRADE_COLOR = { perfect: PAPER, great: WALLS[1].rgb, good: WALLS[0].rgb, miss: MUTED };
     function drawCentre(now) {
@@ -2225,19 +2296,7 @@
       { bar: 20, name: 'CHORUS', hue: 3 }, { bar: 28, name: 'BREAK', hue: 2 }, { bar: 32, name: 'CHORUS II', hue: 3 },
       { bar: 40, name: 'OUTRO', hue: 0 },
     ];
-    const BARS = [
-      '0...1...2...3...', '3...2...1...0...', '0...2...1...3...', 'a-------2...3...',
-      '0...1.2.3...2.1.', '0...3...1...2...', '0.1...2.3...2...', 'b-------0...3...',
-      '3...2.1.0...1.2.', '3...0...2...1...', '3.2...1.0...1...', 'c-------3.2.1.0.',
-      '0.1.2.3.0.1.2.3.', '3.2.1.0.3.2.1.0.', ['0...1...2...3...', '2...3...0...1...'], '0.2.1.3.0.2.1.3.',
-      '0.1.0.1.2.3.2.3.', ['0...0...3...3...', '..1...1...2...2.'], '0.1.2.3.3.2.1.0.', '0.1.2.3.01230123',
-      ['0...2...0...2...', '..1...3...1...3.'], 'a-------1.2.3.2.', ['3...1...3...1...', '..2...0...2...0.'], 'd-------0.1.0123',
-      '0.1.2.3.0.1.2.3.', ['0...1...2...3...', '3...2...1...0...'], ['b-------........', '....0.3.0.3.2.3.'], '0123..3210..0.3.',
-      'a-------c-------', 'b-------d-------', ['a---------------', '........c-------'], 'd-------0.1.2.3.',
-      '0.2.1.3.0.2.1.3.', ['0...1...2...3...', '2...3...0...1...'], '0.1.2.3.01233210', 'c-------1.0.1.0.',
-      ['0...2...0...2...', '..1...3...1...3.'], '3.2.1.0.3.2.1.0.', ['0.0.....3.3.....', '....1.2.....2.1.'], ['0.1.2.3.0.1.2.3.', '........3.....0.'],
-      ['0...............', '3...............'], '1...2...1...2...', ['a---------------', 'd---------------'], '................',
-    ];
+    const BARS = kit.std4();
     // Dances: where each firefly sits, in units of the play area (x right, y down), at a beat.
     const DANCES = {
       line: (l) => [(l - 1.5) * 0.4, 0.12],
@@ -2263,11 +2322,7 @@
       { pad: [55, 60, 64], bass: 36, lead: [67, 72, 76, 79] },
       { pad: [54, 57, 62], bass: 38, lead: [66, 69, 74, 78] },
     ];
-    const rnd = kit.mulberry32(132);
-    const CHART = kit.parseLanes(BARS, SPB, 4);
-    // where each light stream comes from, and which way it curls
-    for (const n of CHART) { n.from = rnd() * TAU; n.curl = rnd() < 0.5 ? -1 : 1; }
-    kit.sortChart(CHART);
+    const CHART = kit.sortChart(kit.parseLanes(BARS, SPB, 4));
     const kickBar = (bar) => { const n = SECTIONS[kit.secIndex(SECTIONS, bar)].name; return (n !== 'INTRO' && n !== 'BREAK') || bar === 31; };
 
     // ----- layout -----
@@ -2293,12 +2348,17 @@
       return [A.cx + x * A.u, A.cy + y * A.u];
     }
     // light stream for note n: quadratic curve from its source to the firefly as it is now
+    // Each stream comes in from straight behind its firefly (outward from the middle of the dance),
+    // so the closest light to a firefly is always the next one; left-hand colours curl one way, right-hand the other.
     function streamPoint(n, k, now, end) {
       const hit = recPos(n.lane, n.t);
       const D = Math.max(W, H) * 0.75;
-      const sx = hit[0] + Math.cos(n.from) * D, sy = hit[1] + Math.sin(n.from) * D;
+      let from = Math.atan2(hit[1] - A.cy, hit[0] - A.cx);
+      if (Math.hypot(hit[0] - A.cx, hit[1] - A.cy) < A.u * 0.05) from = n.lane < 2 ? Math.PI : 0;
+      const curl = n.lane < 2 ? -1 : 1;
+      const sx = hit[0] + Math.cos(from) * D, sy = hit[1] + Math.sin(from) * D;
       const mx = (sx + hit[0]) / 2, my = (sy + hit[1]) / 2;
-      const cx = mx - Math.sin(n.from) * D * 0.45 * n.curl, cy = my + Math.cos(n.from) * D * 0.45 * n.curl;
+      const cx = mx - Math.sin(from) * D * 0.3 * curl, cy = my + Math.cos(from) * D * 0.3 * curl;
       const e = end || recPos(n.lane, now);
       const a = (1 - k) * (1 - k), b = 2 * (1 - k) * k, c = k * k;
       return [a * sx + b * cx + c * e[0], a * sy + b * cy + c * e[1]];
@@ -2355,6 +2415,7 @@
     }
     function drawStreams(now) {
       const r = recR();
+      const chords = [];
       g.lineCap = 'round';
       for (let i = S.notes.length - 1; i >= 0; i--) {
         const n = S.notes[i];
@@ -2398,6 +2459,9 @@
           g.beginPath(); g.arc(x, y, r * 0.42 * (1 - s / 16), 0, TAU); g.fill();
         }
         const [hx, hy] = streamPoint(n, kHead, now, end);
+        // join chord partners only once they are close in, or the bar would cross the whole screen
+        const onScreen = hx > 0 && hx < W && hy > 0 && hy < H;
+        if (n.chord && kHead > 0.7 && onScreen) chords.push({ t: n.t, x: hx, y: hy, a: Math.min(1, (kHead - 0.7) / 0.12) });
         g.fillStyle = rgba(col, 0.35 * appear);
         g.beginPath(); g.arc(hx, hy, r * 0.75, 0, TAU); g.fill();
         g.globalCompositeOperation = 'source-over';
@@ -2406,6 +2470,7 @@
         g.fillStyle = rgba(PAPER, 0.9 * appear);
         g.beginPath(); g.arc(hx, hy, r * 0.14, 0, TAU); g.fill();
       }
+      kit.chordLines(chords, PAPER);
     }
     function drawFireflies(now) {
       const r = recR();
@@ -2999,20 +3064,13 @@
     const tiltAt = (beat) => (beat >= 128 && beat < 160 ? 12 * Math.sin((TAU * beat) / 16) : 0);
     const armAngle = (beat) => tiltAt(beat) + ampAt(beat) * Math.sin(Math.PI * phaseAt(beat)); // degrees
 
-    // A hold must stay inside one swing so the arm sweeps along it in one direction.
-    const BARS = [
-      '0...1...2...3...', '3...2...1...0...', '0...0...3...3...', '1.2.3...2...a---',
-      '0...1.2.3...2.1.', '0...3...1...2...', '0.1...2.3...2...', '1...b-------....',
-      '3...2.1.0...1.2.', '3...0...2...1...', '3.2...1.0...1...', '....c-------0.1.',
-      '0.1.2.3.0.1.2.3.', '3.2.1.0.3.2.1.0.', ['0...1...2...3...', '2...3...0...1...'], '0.2.1.3.0.2.1.3.',
-      '0.1.0.1.2.3.2.3.', ['0...0...3...3...', '..1...1...2...2.'], '0.1.2.3.3.2.1.0.', '0.1.2.3.01230123',
-      ['0...2...0...2...', '..1...3...1...3.'], '..a---..1.2.3.2.', ['3...1...3...1...', '..2...0...2...0.'], '..d---..0.1.0123',
-      '0.1.2.3.0.1.2.3.', ['0...1...2...3...', '3...2...1...0...'], ['..b---..........', '......0.3.0.3.2.'], '0123..3210..0.3.',
-      '0...1...a-------', 'c-------3...1...', '0...1...b-------', 'd-------0.1.2.3.',
-      '0.2.1.3.0.2.1.3.', ['0...1...2...3...', '2...3...0...1...'], '0.1.2.3.01233210', '..c---..1.0.1.0.',
-      ['0...2...0...2...', '..1...3...1...3.'], '3.2.1.0.3.2.1.0.', ['0.0.....3.3.....', '....1.2.....2.1.'], ['0.1.2.3.0.1.2.3.', '........3.....0.'],
-      ['0...............', '3...............'], '1...2...1...2...', ['....a-------....', '....d-------....'], '................',
-    ];
+    // The shared chart, with each hold moved so it stays inside one swing (the arm sweeps along it in one direction).
+    const BARS = kit.std4({
+      7: ['....a-------....', '2.3.........2.3.'],
+      11: ['....d-------....', '1.0.........1.0.'],
+      26: ['..b---..........', '......3.2.3.2...'],
+      42: ['....a-------....', '....d-------....'],
+    });
     // Bm - G - D - A. Lead pitch per band, low inside to high outside.
     const CHORDS = [
       { pad: [59, 62, 66], bass: 47, lead: [71, 74, 78, 83] },
@@ -3111,6 +3169,7 @@
       }
     }
     function drawNotes(now) {
+      const chords = [];
       g.lineJoin = 'round';
       for (let i = S.notes.length - 1; i >= 0; i--) {
         const n = S.notes[i];
@@ -3132,6 +3191,7 @@
         if (n.head) continue;
         // a tick lying along the arm's direction; bright for this swing, an outline for the next
         const half = Math.max(1.2, (7 / mid) / DEG);
+        if (n.chord && live) { const [cx, cy] = at(n.ang, mid); chords.push({ t: n.t, x: cx, y: cy }); }
         sectorPath(n.ang - half, n.ang + half, r0 + 2, r1 - 2);
         if (live) {
           const k = Math.max(0, 1 - (n.t - now) / 0.8);
@@ -3144,6 +3204,7 @@
           g.strokeStyle = rgba(col, 0.45); g.lineWidth = 1.5; g.stroke();
         }
       }
+      kit.chordLines(chords, PAPER);
     }
     function drawArm(now) {
       const beat = now / SPB, ang = armAngle(beat);
@@ -3349,19 +3410,7 @@
       { bar: 32, name: 'CHORUS II', gap: 0.32, spin: 180, angles: [0, 45, 90, 135] },
       { bar: 40, name: 'OUTRO', gap: 0.26, spin: 0, angles: [0] },
     ];
-    const BARS = [
-      '0...1...2...3...', '3...2...1...0...', '0...2...1...3...', 'a-------2...3...',
-      '0...1.2.3...2.1.', '0...3...1...2...', '0.1...2.3...2...', 'b-------0...3...',
-      '3...2.1.0...1.2.', '3...0...2...1...', '3.2...1.0...1...', 'c-------3.2.1.0.',
-      '0.1.2.3.0.1.2.3.', '3.2.1.0.3.2.1.0.', ['0...1...2...3...', '2...3...0...1...'], '0.2.1.3.0.2.1.3.',
-      '0.1.0.1.2.3.2.3.', ['0...0...3...3...', '..1...1...2...2.'], '0.1.2.3.3.2.1.0.', '0.1.2.3.01230123',
-      ['0...2...0...2...', '..1...3...1...3.'], 'a-------1.2.3.2.', ['3...1...3...1...', '..2...0...2...0.'], 'd-------0.1.0123',
-      '0.1.2.3.0.1.2.3.', ['0...1...2...3...', '3...2...1...0...'], ['b-------........', '....0.3.0.3.2.3.'], '0123..3210..0.3.',
-      'a-------c-------', 'b-------d-------', ['a---------------', '........c-------'], 'd-------0.1.2.3.',
-      '0.2.1.3.0.2.1.3.', ['0...1...2...3...', '2...3...0...1...'], '0.1.2.3.01233210', 'c-------1.0.1.0.',
-      ['0...2...0...2...', '..1...3...1...3.'], '3.2.1.0.3.2.1.0.', ['0.0.....3.3.....', '....1.2.....2.1.'], ['0.1.2.3.0.1.2.3.', '........3.....0.'],
-      ['0...............', '3...............'], '1...2...1...2...', ['a---------------', 'd---------------'], '................',
-    ];
+    const BARS = kit.std4();
     // Cm - Ab - Eb - Bb. Lead pitch per zone.
     const CHORDS = [
       { pad: [55, 60, 63], bass: 36, lead: [67, 72, 75, 79] },
@@ -3369,19 +3418,16 @@
       { pad: [55, 58, 63], bass: 39, lead: [67, 70, 75, 79] },
       { pad: [53, 58, 62], bass: 46, lead: [65, 70, 74, 77] },
     ];
-    // each note gets its pair of blades: height in its zone, final angle, and how far it turns
-    const rnd = kit.mulberry32(136);
+    // Each note gets its pair of blades. Inside a zone, notes sit higher the earlier they come in the
+    // bar, so time reads top to bottom and a stair pattern across the zones reads as a diagonal.
+    // All blades in a bar share one final angle, and the turning direction alternates bar by bar.
     const CHART = kit.parseLanes(BARS, SPB, 4);
-    const lastY = [0, 0, 0, 0];
     for (const n of CHART) {
       const sec = SECTIONS[kit.secIndex(SECTIONS, n.bar)];
-      // step up or down the zone so back-to-back notes in one zone do not sit on top of each other
-      let y = (rnd() - 0.5) * 0.6;
-      if (Math.abs(y - lastY[n.lane]) < 0.18) y = lastY[n.lane] > 0 ? lastY[n.lane] - 0.3 : lastY[n.lane] + 0.3;
-      lastY[n.lane] = y;
-      n.x = ZONE_X[n.lane]; n.y = y;
-      n.ang = sec.angles[Math.floor(rnd() * sec.angles.length)];
-      n.spin = sec.spin * (rnd() < 0.5 ? -1 : 1);
+      n.x = ZONE_X[n.lane];
+      n.y = -0.34 + 0.68 * (n.step / 15);
+      n.ang = sec.angles[n.bar % sec.angles.length];
+      n.spin = sec.spin * (n.bar % 2 ? -1 : 1);
       n.gap = sec.gap;
     }
     kit.sortChart(CHART);
@@ -3466,6 +3512,7 @@
       }
     }
     function drawBlades(now) {
+      const chords = [];
       g.lineCap = 'round';
       for (let i = S.notes.length - 1; i >= 0; i--) {
         const n = S.notes[i];
@@ -3492,6 +3539,7 @@
         if (n.head) continue;
         // where the blades will meet, and at what angle
         const f = blades(n, n.t);
+        if (n.chord) chords.push({ t: n.t, x: f.cx, y: f.cy, a: appear });
         g.setLineDash([3, 6]);
         g.strokeStyle = rgba(col, 0.3 * appear); g.lineWidth = 1.2;
         g.beginPath(); g.moveTo(f.cx - f.ux * f.half, f.cy - f.uy * f.half); g.lineTo(f.cx + f.ux * f.half, f.cy + f.uy * f.half); g.stroke();
@@ -3510,6 +3558,7 @@
           g.strokeStyle = rgba(PAPER, 0.75 * appear); g.lineWidth = 1.2; g.stroke();
         }
       }
+      kit.chordLines(chords, PAPER);
     }
     const GRADE_COLOR = { perfect: PAPER, great: ZONES[1].rgb, good: ZONES[2].rgb, miss: MUTED };
     function drawPopup(now) {
@@ -3635,38 +3684,26 @@
   // ---------------------------------------------------------------------
   //  TOMOSHI: a judgement line you move yourself. Lanterns hang still in
   //  four rows; you sweep a beam of light across with the mouse (or your
-  //  finger) and light each lantern by pressing its row's key while the
-  //  beam is on it. The chart is fixed; how you sweep is up to you.
+  //  finger), and a lantern lights if the beam is on it at its moment.
+  //  Nothing to press. The chart is fixed; how you sweep is up to you.
   // ---------------------------------------------------------------------
   defineMode((kit) => {
     const { g, rgba, hex, S, TAU } = kit;
     const BPM = 118, SPB = 60 / BPM;
     const theme = { ink: '#070b1f', ink2: '#1d1433', panel: 'rgba(7, 11, 31, 0.84)', paper: '#fbf3e4', muted: '#b0a6c4', accent: '#ffb43d' };
     const INK = hex(theme.ink), INK2 = hex(theme.ink2), PAPER = hex(theme.paper), MUTED = hex(theme.muted), WARM = hex('#ffd9a0');
-    // Rows from the top down.
+    // Rows from the top down; they only set where a lantern hangs, not a key.
     const ROWS = [
-      { label: 'D', name: '上段・朱', color: '#ff6b4a' },
-      { label: 'F', name: '山吹', color: '#ffb43d' },
-      { label: 'J', name: '桃', color: '#ff8fb8' },
-      { label: 'K', name: '下段・若竹', color: '#8fe08a' },
+      { label: '上', name: '朱', color: '#ff6b4a' },
+      { label: '二', name: '山吹', color: '#ffb43d' },
+      { label: '三', name: '桃', color: '#ff8fb8' },
+      { label: '下', name: '若竹', color: '#8fe08a' },
     ].map((r) => ({ ...r, rgb: hex(r.color) }));
     const SECTIONS = [
       { bar: 0, name: 'INTRO' }, { bar: 4, name: 'VERSE' }, { bar: 12, name: 'BUILD' }, { bar: 20, name: 'CHORUS' },
       { bar: 28, name: 'BREAK' }, { bar: 32, name: 'CHORUS II' }, { bar: 40, name: 'OUTRO' },
     ];
-    const BARS = [
-      '0...1...2...3...', '3...2...1...0...', '0...2...1...3...', 'a-------2...3...',
-      '0...1.2.3...2.1.', '0...3...1...2...', '0.1...2.3...2...', 'b-------0...3...',
-      '3...2.1.0...1.2.', '3...0...2...1...', '3.2...1.0...1...', 'c-------3.2.1.0.',
-      '0.1.2.3.0.1.2.3.', '3.2.1.0.3.2.1.0.', ['0...1...2...3...', '2...3...0...1...'], '0.2.1.3.0.2.1.3.',
-      '0.1.0.1.2.3.2.3.', ['0...0...3...3...', '..1...1...2...2.'], '0.1.2.3.3.2.1.0.', '0.1.2.3.01230123',
-      ['0...2...0...2...', '..1...3...1...3.'], 'a-------1.2.3.2.', ['3...1...3...1...', '..2...0...2...0.'], 'd-------0.1.0123',
-      '0.1.2.3.0.1.2.3.', ['0...1...2...3...', '3...2...1...0...'], ['b-------........', '....0.3.0.3.2.3.'], '0123..3210..0.3.',
-      'a-------c-------', 'b-------d-------', ['a---------------', '........c-------'], 'd-------0.1.2.3.',
-      '0.2.1.3.0.2.1.3.', ['0...1...2...3...', '2...3...0...1...'], '0.1.2.3.01233210', 'c-------1.0.1.0.',
-      ['0...2...0...2...', '..1...3...1...3.'], '3.2.1.0.3.2.1.0.', ['0.0.....3.3.....', '....1.2.....2.1.'], ['0.1.2.3.0.1.2.3.', '........3.....0.'],
-      ['0...............', '3...............'], '1...2...1...2...', ['a---------------', 'd---------------'], '................',
-    ];
+    const BARS = kit.std4();
     // E - C#m - A - B. Lead pitch per row: high at the top.
     const CHORDS = [
       { pad: [52, 56, 59], bass: 40, lead: [76, 71, 68, 64] },
@@ -3769,16 +3806,10 @@
         g.beginPath();
         for (let k = 0; k <= 32; k++) { const nx = k / 32; const x = fx(nx), y = rowY(r, nx) - lw() * 0.75; if (k === 0) g.moveTo(x, y); else g.lineTo(x, y); }
         g.stroke();
-        // row key on the left
-        const col = ROWS[r].rgb, down = S.pressed[r] || S.autoHold[r] > now;
-        const x = R.x - 28, y = rowY(r, 0);
-        g.fillStyle = down ? rgba(col, 0.6) : rgba(INK, 0.7);
-        g.beginPath(); g.arc(x, y, 15, 0, TAU); g.fill();
-        g.strokeStyle = rgba(col, 1); g.lineWidth = 2; g.stroke();
-        g.fillStyle = rgba(PAPER, 0.95);
-        g.font = '15px "Dela Gothic One", sans-serif';
-        g.textAlign = 'center'; g.textBaseline = 'middle';
-        g.fillText(ROWS[r].label, x, y + 1);
+        // a small lamp at the start of each row, lit for a moment when its row scores
+        const col = ROWS[r].rgb, x = R.x - 24, y = rowY(r, 0);
+        g.fillStyle = rgba(col, 0.35 + 0.65 * S.flash[r]);
+        g.beginPath(); g.arc(x, y, 6 + 3 * S.flash[r], 0, TAU); g.fill();
       }
     }
     // a paper lantern: `fill` is how far its light has risen inside (0..1), `lit` makes it glow fully
@@ -3895,8 +3926,7 @@
       // where the beam crosses each row; it flares while the row's key is down
       for (let r = 0; r < 4; r++) {
         const nx = (x - R.x) / R.w, y = rowY(r, nx), col = ROWS[r].rgb;
-        const down = S.pressed[r] || S.autoHold[r] > now;
-        if (down || S.flash[r] > 0) {
+        if (S.flash[r] > 0) {
           const rad = lw() * (1.1 + 0.6 * S.flash[r]);
           const flare = g.createRadialGradient(x, y, 0, x, y, rad);
           flare.addColorStop(0, rgba(col, 0.55 + 0.35 * S.flash[r])); flare.addColorStop(1, rgba(col, 0));
@@ -3930,26 +3960,20 @@
     return {
       id: 'tomoshi', name: 'TOMOSHI', kind: '自分で動かす判定線', kana: '灯し ・ 自分で動かす判定線',
       blurb: '提灯は動かない。判定線（光の柱）を自分で動かし、提灯に重ねた瞬間にその段のキーで灯す。',
-      lede: '提灯は夜空に吊られたまま動きません。<strong>判定線（光の柱）を自分で動かし</strong>、提灯に重ねて、その提灯の灯りが満ちた瞬間に、提灯の段のキーを押します。点線はおすすめの動かし方です。',
+      lede: '提灯は夜空に吊られたまま動きません。<strong>判定線（光の柱）を自分で動かし</strong>、提灯の灯りが満ちる瞬間に柱を重ねておけば灯ります。キーやタップは要りません。点線はおすすめの動かし方です。',
       keys: ROWS.map((r) => ({ label: r.label, name: r.name, color: r.color })),
       how: [
-        ['パソコン', 'マウスで光の柱を左右に動かし、段のキー <kbd>D</kbd> <kbd>F</kbd> <kbd>J</kbd> <kbd>K</kbd> を押す（提灯をクリックしても灯せます）'],
-        ['スマホ', '提灯を直接タップ'],
-        ['長押し', '押したまま、灯りの列に沿って光の柱を動かす'],
+        ['パソコン', 'マウスを左右に動かすだけ'],
+        ['スマホ', '画面に指を置いて左右になぞるだけ'],
+        ['長い灯り', '灯りの列に沿って、光の柱を動かし続ける'],
       ],
-      touchHint: '光の柱はマウスか指で動かします',
+      touchHint: '光の柱はマウスか指で動かすだけ',
       meta: 'BPM 118 ・ 44小節 ・ 約1分30秒 ・ 譜面は決まっていますが、どう動かすかは自由です。',
-      theme, attractFromBar: 20, hideCursor: true,
+      theme, attractFromBar: 20, hideCursor: true, input: 'line',
       bpm: BPM, bars: 44, sections: SECTIONS, chords: CHORDS, chart: CHART,
-      laneCodes: [['KeyD'], ['KeyF'], ['KeyJ'], ['KeyK']],
-      // a press only counts while the beam is over the lantern
-      laneAccept: (n) => Math.abs(beamX() - fx(n.x)) <= tol(),
+      // a lantern lights if the beam is on it at its moment; a garland needs the beam to keep following
+      lineOn: (n) => Math.abs(beamX() - fx(n.x)) <= tol(),
       holdCheck: (n, now) => Math.abs(beamX() - fx(holdX(n, now))) <= tol() * 1.3,
-      // a tap or click picks the row it lands in; the beam jumps to it first (the engine moves the aim)
-      touchLane(x, y) {
-        if (y < R.y - rowGap() * 0.3 || y > R.y + R.h + rowGap() * 0.3) return -1;
-        return Math.max(0, Math.min(3, Math.floor((y - R.y) / rowGap())));
-      },
       song: {
         bass: { wave: 'triangle', subShift: 0, sub: 0.8, q: 4, open: 900, close: 200 },
         pad: { wave: 'sawtooth', cutoff: 1100, level: 0.045, detune: 9, attack: 0.45 },
@@ -4080,19 +4104,7 @@
       { bar: 32, name: 'CHORUS II', twist: 60, bend: 0.55, flip: true, hue: 0 },
       { bar: 40, name: 'OUTRO', twist: 6, bend: 0.2, hue: 2 },
     ];
-    const BARS = [
-      '0...1...2...3...', '3...2...1...0...', '0...2...1...3...', 'a-------2...3...',
-      '0...1.2.3...2.1.', '0...3...1...2...', '0.1...2.3...2...', 'b-------0...3...',
-      '3...2.1.0...1.2.', '3...0...2...1...', '3.2...1.0...1...', 'c-------3.2.1.0.',
-      '0.1.2.3.0.1.2.3.', '3.2.1.0.3.2.1.0.', ['0...1...2...3...', '2...3...0...1...'], '0.2.1.3.0.2.1.3.',
-      '0.1.0.1.2.3.2.3.', ['0...0...3...3...', '..1...1...2...2.'], '0.1.2.3.3.2.1.0.', '0.1.2.3.0.1.2.3.',
-      ['0...2...0...2...', '..1...3...1...3.'], 'a-------1.2.3.2.', ['3...1...3...1...', '..2...0...2...0.'], 'd-------0.1.2.3.',
-      '0.1.2.3.0.1.2.3.', ['0...1...2...3...', '3...2...1...0...'], ['b-------........', '....0.3.0.3.2.3.'], '0.1.2.3.3.2.1.0.',
-      'a-------c-------', 'b-------d-------', ['a---------------', '........c-------'], 'd-------0.1.2.3.',
-      '0.2.1.3.0.2.1.3.', ['0...1...2...3...', '2...3...0...1...'], '0.1.2.3.3.2.1.0.', 'c-------1.0.1.0.',
-      ['0...2...0...2...', '..1...3...1...3.'], '3.2.1.0.3.2.1.0.', ['0.0.....3.3.....', '....1.2.....2.1.'], ['0.1.2.3.0.1.2.3.', '........3.....0.'],
-      ['0...............', '3...............'], '1...2...1...2...', ['a---------------', 'd---------------'], '................',
-    ];
+    const BARS = kit.std4({ 19: '0.1.2.3.3.2.1.0.', 39: '0.1.2.3.3.2.1.0.' });
     // F#m - D - A - E. Lead pitch per stripe.
     const CHORDS = [
       { pad: [54, 57, 61], bass: 42, lead: [66, 69, 73, 78] },
@@ -4222,6 +4234,7 @@
 
     function drawNotes(now) {
       const W2 = 26; // half-width of a note tile, in degrees
+      const chords = [];
       for (let i = S.notes.length - 1; i >= 0; i--) {
         const n = S.notes[i];
         if (n.t - now > VIEW * 1.1 || n.end < now - 0.15) continue;
@@ -4254,6 +4267,7 @@
         const [x, y, r, k] = slice(n.t, now);
         const c = stripeAng(n.lane, n.t) * DEG, w = W2 * DEG;
         const appear = Math.min(1, (VIEW * 1.1 - (n.t - now)) / (VIEW * 0.2));
+        if (n.chord) chords.push({ t: n.t, x: x + Math.cos(c) * r * 0.93, y: y + Math.sin(c) * r * 0.93, a: appear });
         g.globalAlpha = appear;
         g.beginPath();
         g.arc(x, y, r, c - w, c + w);
@@ -4267,6 +4281,7 @@
         g.beginPath(); g.arc(x, y, r * 0.93, c - w * 0.7, c + w * 0.7); g.stroke();
         g.globalAlpha = 1;
       }
+      kit.chordLines(chords, PAPER);
     }
 
     function drawRim(now) {
