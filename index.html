@@ -98,9 +98,13 @@
 
   @media (min-width: 900px) {
     .panel-wrap { align-items: center; padding-left: max(48px, env(safe-area-inset-left, 0px)); }
-    /* keep the whole list on one screen: one line of description per card */
-    .mode-card { padding: 8px 14px; }
-    .mode-card .mc-desc { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+    /* keep the whole list on one screen as it grows: two columns, name and kind only (the title screen explains each) */
+    .modes { grid-template-columns: 1fr 1fr; }
+    .mode-card { padding: 9px 12px; grid-template-columns: 1fr auto; align-items: center; }
+    .mode-card .dots { grid-column: 2; grid-row: 1; }
+    .mode-card .mc-kind { grid-column: 1 / 3; grid-row: 2; font-size: 0.74rem; }
+    .mode-card .mc-desc { display: none; }
+    .mode-card .mc-name { font-size: 0.98rem; }
     #menuWrap .panel { gap: 12px; }
   }
   @media (max-height: 700px) and (max-width: 899px) {
@@ -260,6 +264,7 @@
     wide: () => W >= 900 && S.screen !== 'play',
     view: (base) => base / settings.speed,
     runOf: (c) => byChart.get(c),
+    keys: new Set(), // every key held during play, by KeyboardEvent.code
     holding: (n) => n.holding !== null,
     secIndex(sections, bar) {
       let i = 0;
@@ -340,7 +345,7 @@
     S.counts = { perfect: 0, great: 0, good: 0, miss: 0 };
     S.pressed.fill(false); S.autoHold.fill(0); S.flash.fill(0);
     S.popup = null;
-    keyDown.clear(); pointerLane.clear(); aimPointers.clear();
+    keyDown.clear(); pointerLane.clear(); aimPointers.clear(); kit.keys.clear();
     if (M.onNewRun) M.onNewRun();
     cv.classList.toggle('aiming', (M.input === 'aim' || M.hideCursor) && !auto && !attract);
     linePointers.clear();
@@ -547,7 +552,7 @@
         M.song.arrange(add, bar, b0, ch, name);
       }
       if (M.song.extra) M.song.extra(add);
-      for (const n of M.chart) add(n.beat, 'lead', M.song.leadMidi(n), n.dur);
+      for (const n of M.chart) { const m = M.song.leadMidi(n); if (m != null) add(n.beat, 'lead', m, n.dur); }
       ev.sort((a, b) => a.t - b.t);
       return ev;
     }
@@ -559,7 +564,10 @@
       while (idx < song.length) {
         const e = song[idx], at = start + e.t;
         if (at > horizon) break;
-        if (at >= ac.currentTime - 0.02) I[e.fn](Math.max(at, ac.currentTime), ...e.a);
+        if (at >= ac.currentTime - 0.02) {
+          const when = Math.max(at, ac.currentTime);
+          if (I[e.fn]) I[e.fn](when, ...e.a); else M.song.instruments[e.fn](A, when, ...e.a);
+        }
         idx++;
       }
     }
@@ -587,9 +595,14 @@
         song = buildSong(); idx = 0;
         start = ac.currentTime + 2.2;
         running = true;
+        if (M.onAudioStart) M.onAudioStart(A);
         pump();
       },
-      halt() { running = false; if (out) out.gain.setTargetAtTime(0, ac.currentTime, 0.05); },
+      halt() {
+        running = false;
+        if (out) out.gain.setTargetAtTime(0, ac.currentTime, 0.05);
+        for (const m of MODES) if (m.onAudioStop) m.onAudioStop();
+      },
       songTime,
       tick() {
         if (!ac || !out) return;
@@ -781,6 +794,8 @@
     if (S.screen === 'play') {
       if (e.code === 'Escape') { showTitle(); return; }
       if (S.auto) return;
+      kit.keys.add(e.code);
+      if (M.wantsKeys && M.wantsKeys.includes(e.code)) e.preventDefault();
       if (M.input === 'aim') {
         if (e.code === 'KeyZ' || e.code === 'KeyX') { e.preventDefault(); if (!e.repeat) pressAim(e.code, audio.songTime()); }
         return;
@@ -800,6 +815,7 @@
   });
   window.addEventListener('keyup', (e) => {
     keyDown.delete(e.code);
+    kit.keys.delete(e.code);
     if (S.screen !== 'play' || S.auto) return;
     if (M.input === 'aim') { if (e.code === 'KeyZ' || e.code === 'KeyX') release(e.code, audio.songTime()); return; }
     const l = laneOfCode(e.code);
@@ -808,7 +824,9 @@
     if (!S.pressed[l]) release(laneToken(l), audio.songTime());
   });
 
+  window.addEventListener('blur', () => kit.keys.clear());
   window.addEventListener('pointermove', (e) => {
+    if (M && M.onPointer && playing()) M.onPointer('move', e);
     if (e.pointerType === 'mouse') { S.aim.x = e.clientX; S.aim.y = e.clientY; S.touch = false; }
     else if (aimPointers.has(e.pointerId)) aimPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     else if (pointerLane.has(e.pointerId) || linePointers.has(e.pointerId)) { S.aim.x = e.clientX; S.aim.y = e.clientY; }
@@ -817,7 +835,11 @@
     if (!playing()) return;
     e.preventDefault();
     const now = audio.songTime();
-    if (M.input === 'line') { S.aim.x = e.clientX; S.aim.y = e.clientY; S.touch = e.pointerType !== 'mouse'; linePointers.add(e.pointerId); return; }
+    if (M.input === 'line') {
+      S.aim.x = e.clientX; S.aim.y = e.clientY; S.touch = e.pointerType !== 'mouse'; linePointers.add(e.pointerId);
+      if (M.onPointer) M.onPointer('down', e);
+      return;
+    }
     if (M.input === 'aim') {
       if (e.pointerType === 'mouse') { S.aim.x = e.clientX; S.aim.y = e.clientY; pressAim('mouse', now); return; }
       S.touch = true;
@@ -834,6 +856,7 @@
   });
   const endPointer = (e) => {
     linePointers.delete(e.pointerId);
+    if (M && M.onPointer) M.onPointer('up', e);
     if (S.screen !== 'play') return;
     if (M.input === 'aim') {
       if (e.pointerType === 'mouse') release('mouse', audio.songTime());
@@ -908,6 +931,9 @@
   //  hideCursor; or input: 'aim' + hitTest/followPos/followReach; or
   //  input: 'line' + lineOn(note, now) for modes with nothing to press),
   //  chords: notes sharing a moment have note.chord; draw kit.chordLines,
+  //  extra input: kit.keys (held key codes), wantsKeys, onPointer(phase, e);
+  //  extra sound: song.instruments, onAudioStart(A) / onAudioStop() for
+  //  voices that play continuously, song.leadMidi may return null,
   //  and layout / update / draw / onJudge / onNewRun.
   // =====================================================================
 
@@ -4430,6 +4456,557 @@
     };
   });
 
+  // ---------------------------------------------------------------------
+  //  ENBAN: two discs. Each disc slides its own cursor left and right
+  //  along the judgement line. Every note is a long note: a path of light
+  //  that bends as it comes down, and you keep your cursor on it. The path
+  //  is the sound: across the track is pitch, so following a path plays
+  //  its melody, a slant is a glide, and a sudden jump (a slam) is a leap
+  //  you flick the disc for. Off the path, your voice goes sour.
+  // ---------------------------------------------------------------------
+  defineMode((kit) => {
+    const { g, rgba, hex, S, TAU } = kit;
+    const BPM = 174, SPB = 60 / BPM;
+    const theme = { ink: '#05030c', ink2: '#170a2a', panel: 'rgba(5, 3, 12, 0.86)', paper: '#f2eefe', muted: '#a49cc2', accent: '#ff3d9a' };
+    const INK = hex(theme.ink), INK2 = hex(theme.ink2), PAPER = hex(theme.paper), MUTED = hex(theme.muted);
+    const DISCS = [
+      { name: '左の円盤', color: '#35d4ff', keys: ['KeyA', 'KeyD'], hint: 'A ◀  ▶ D' },
+      { name: '右の円盤', color: '#ff3d9a', keys: ['ArrowLeft', 'ArrowRight'], hint: '◀ ←  → ▶' },
+    ].map((d) => ({ ...d, rgb: hex(d.color) }));
+    const SECTIONS = [
+      { bar: 0, name: 'INTRO' }, { bar: 4, name: 'RISE' }, { bar: 12, name: 'BUILD' }, { bar: 20, name: 'DROP' },
+      { bar: 28, name: 'BREAK' }, { bar: 32, name: 'DROP II' }, { bar: 40, name: 'OUTRO' },
+    ];
+    // Em - C - G - D
+    const CHORDS = [
+      { pad: [52, 55, 59], bass: 40 },
+      { pad: [52, 55, 60], bass: 36 },
+      { pad: [50, 55, 59], bass: 43 },
+      { pad: [50, 54, 57], bass: 38 },
+    ];
+    // Across the track is pitch: nine steps of E minor pentatonic. The right disc sings an octave above the left.
+    const SCALE = [52, 55, 57, 59, 62, 64, 67, 69, 71];
+    const midiAt = (d, deg) => {
+      const k = Math.max(0, Math.min(8, deg)), i = Math.min(7, Math.floor(k));
+      return SCALE[i] + (SCALE[i + 1] - SCALE[i]) * (k - i) + (d ? 12 : 0);
+    };
+
+    // ----- the paths (lasers): [beat, step 0-8] points, joined straight; two points on one beat = a slam -----
+    const LASERS = [[], []];
+    const laser = (d, pts) => LASERS[d].push({ d, pts });
+    const zig = (b0, b1, a, b, step) => { const p = []; for (let x = b0, k = 0; x <= b1 + 1e-9; x += step, k++) p.push([x, k % 2 ? b : a]); return p; };
+    const stairs = (b0, len, steps) => steps.flatMap((s, i) => [[b0 + i * len, s], [b0 + (i + 1) * len, s]]);
+    // INTRO: a slow call on the left, answered on the right
+    laser(0, [[0, 2], [4, 2], [6, 5], [8, 5], [10, 2], [14, 2], [16, 4]]);
+    laser(1, [[8, 6], [10, 6], [12, 8], [14, 8], [16, 6]]);
+    // RISE: left plays a bass line in stairs, right weaves; then they swap roles
+    laser(0, [...stairs(16, 2, [2, 4, 2, 5, 2, 4, 1, 4]), ...zig(32, 48, 1, 3, 1).slice(1)]);
+    laser(1, [...zig(16, 32, 5, 7, 2), ...stairs(32, 1, [8, 7, 6, 5, 4, 5, 6, 7, 8, 7, 6, 5, 4, 5, 6, 7])]);
+    // BUILD: the two paths cross back and forth, then shake faster, then both climb into the drop
+    laser(0, [[48, 0], [52, 8], [56, 0], [60, 8], [64, 2], ...zig(64, 76, 2, 4, 0.5).slice(1), [80, 6]]);
+    laser(1, [[48, 8], [52, 0], [56, 8], [60, 0], [64, 8], ...zig(64, 76, 8, 6, 0.5).slice(1), [76, 2], [80, 8]]);
+    // DROP: left slams low-high-mid with a wobble; right saws at the top, slams down, and climbs back
+    {
+      const l = [], r = [];
+      for (let k = 0; k < 8; k++) {
+        const b = 80 + k * 4, flip = k % 2;
+        const lo = flip ? 1 : 0, hi = flip ? 6 : 4, mid = flip ? 3 : 2;
+        l.push([b, lo], [b + 1, lo], [b + 1, hi], [b + 1.25, hi + 1], [b + 1.5, hi], [b + 1.75, hi + 1], [b + 2, hi], [b + 2, mid], [b + 4, mid]);
+        r.push([b, 8], [b + 0.5, 6], [b + 1, 8], [b + 1.5, 6], [b + 2, 8], [b + 2, flip ? 4 : 3], [b + 4, 7]);
+      }
+      laser(0, l); laser(1, r);
+    }
+    // BREAK: long mirrored swells
+    laser(0, [[112, 2], [116, 6], [120, 2], [124, 6], [128, 4]]);
+    laser(1, [[112, 6], [116, 2], [120, 6], [124, 2], [128, 4]]);
+    // DROP II: the hands swap jobs and the slams come every beat
+    {
+      const l = [], r = [];
+      for (let k = 0; k < 8; k++) {
+        const b = 128 + k * 4;
+        r.push([b, 8], [b + 1, 8], [b + 1, 4], [b + 1.25, 3], [b + 1.5, 4], [b + 1.75, 3], [b + 2, 4], [b + 2, 6], [b + 3, 6], [b + 3, 7], [b + 4, 7]);
+        l.push([b, 0], [b + 0.5, 2], [b + 1, 0], [b + 1.5, 2], [b + 2, 0], [b + 2, 5], [b + 4, 1]);
+      }
+      laser(0, l); laser(1, r);
+    }
+    // OUTRO: they part, then meet in the middle
+    laser(0, [[160, 4], [168, 0], [168, 4], [172, 4]]);
+    laser(1, [[160, 4], [168, 8], [168, 4], [172, 4]]);
+
+    // drop repeated points, then work out each path's span and slams
+    const SLAMS = [];
+    for (const d of [0, 1]) for (const las of LASERS[d]) {
+      las.pts = las.pts.filter((p, i, a) => i === 0 || p[0] !== a[i - 1][0] || p[1] !== a[i - 1][1]);
+      las.start = las.pts[0][0]; las.end = las.pts[las.pts.length - 1][0];
+      las.slams = [];
+      for (let i = 1; i < las.pts.length; i++) {
+        const [b0, s0] = las.pts[i - 1], [b1, s1] = las.pts[i];
+        if (b1 < b0) console.warn(`enban: path points out of order at beat ${b1}`);
+        if (b1 === b0) { const sl = { d, beat: b1, t: b1 * SPB, from: s0, to: s1, dir: Math.sign(s1 - s0) }; las.slams.push(sl); SLAMS.push(sl); }
+        else if (Math.abs(s1 - s0) / 8 / ((b1 - b0) * SPB) > 2.4) console.warn(`enban: path at beat ${b0} is too steep to follow`);
+      }
+    }
+    // step along a path at a beat (just after a slam on that beat), and just before it
+    function stepAt(las, beat) {
+      const P = las.pts;
+      let i = -1;
+      for (let k = 0; k < P.length; k++) if (P[k][0] <= beat) i = k;
+      if (i < 0) return P[0][1];
+      if (i === P.length - 1) return P[i][1];
+      const [b0, s0] = P[i], [b1, s1] = P[i + 1];
+      return s0 + (s1 - s0) * ((beat - b0) / (b1 - b0));
+    }
+    function stepBefore(las, beat) {
+      const P = las.pts;
+      const i = P.findIndex((p) => p[0] >= beat);
+      if (i <= 0) return P[Math.max(0, i)][1];
+      if (P[i][0] === beat) return P[i][1];
+      const [b0, s0] = P[i - 1], [b1, s1] = P[i];
+      return s0 + (s1 - s0) * ((beat - b0) / (b1 - b0));
+    }
+    const laserAt = (d, beat) => LASERS[d].find((l) => l.start <= beat && beat < l.end) || null;
+
+    // Scoring: a check every quarter beat along each path (and on each slam) that your cursor is on it.
+    // Checks in the short moment before a slam are skipped, so flicking a little early never costs you.
+    const CHART = [];
+    for (const d of [0, 1]) for (const las of LASERS[d]) {
+      for (let b = las.start; b < las.end - 1e-6; b += 0.25) {
+        if (las.slams.some((sl) => sl.beat > b + 1e-6 && (sl.beat - b) * SPB <= 0.15)) continue;
+        CHART.push({ beat: b, t: b * SPB, lane: d, dur: 0, laser: las, slam: las.slams.some((sl) => Math.abs(sl.beat - b) < 1e-6) });
+      }
+    }
+    kit.sortChart(CHART);
+
+    // ----- play state -----
+    const TOL = 0.11; // how far (in track widths) the cursor may sit from a path and still be on it
+    const KEY_SPEED = 2.6; // track widths per second while a key is held
+    const TURN = 1; // one full turn of a disc moves its cursor one track width
+    const cursor = [0.25, 0.75];
+    const discAngle = [0, 0];
+    const intent = [{ dir: 0, at: -1 }, { dir: 0, at: -1 }]; // the last way each disc was moved, and when
+    const drags = new Map();
+    const glow = [0, 0], sour = [0, 0];
+    let slamDone = new Set(), shake = 0, voices = null, A = null;
+    const onPath = (d, beat) => { const las = laserAt(d, beat); return las ? Math.abs(cursor[d] - stepAt(las, beat) / 8) <= TOL : false; };
+    function moveCursor(d, dx) {
+      const before = cursor[d];
+      cursor[d] = Math.max(0, Math.min(1, cursor[d] + dx));
+      discAngle[d] += ((cursor[d] - before) * TAU) / TURN;
+      if (dx) { intent[d].dir = Math.sign(dx); intent[d].at = performance.now() / 1000; }
+    }
+
+    // ----- layout -----
+    let W = 0, H = 0, VIEW = 1.3;
+    const T = { x0: 0, cx: 0, judgeY: 0, topY: 0, w: 1, discR: 40 }, TG = { x0: 0, cx: 0, judgeY: 0, topY: 0, w: 1, discR: 40 };
+    const KP = 1.5;
+    const persp = (z) => 1 / (1 + KP * Math.max(z, -0.2));
+    const horizonY = () => (T.topY - persp(1) * T.judgeY) / (1 - persp(1));
+    const yOf = (z) => horizonY() + (T.judgeY - horizonY()) * persp(z);
+    // a step (0-8) or a cursor (0-1) to the screen, at depth z
+    const xOfUnit = (u, z) => T.cx + (0.06 + 0.88 * u - 0.5) * T.w * persp(z);
+    const discPos = (d) => [d ? W - T.discR - 22 : T.x0 + T.discR + 22, H - T.discR - 26];
+
+    // ----- effects -----
+    const sparks = [], texts = [];
+    function burst(x, y, col, n, power) {
+      for (let i = 0; i < (kit.reduceMotion ? 3 : n); i++) {
+        const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.8, v = (120 + Math.random() * 380) * power;
+        sparks.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 0, max: 0.25 + Math.random() * 0.35, col });
+      }
+    }
+    function drawEffects(dt) {
+      g.globalCompositeOperation = 'lighter';
+      for (let i = sparks.length - 1; i >= 0; i--) {
+        const p = sparks[i]; p.life += dt;
+        if (p.life > p.max) { sparks.splice(i, 1); continue; }
+        p.vy += 500 * dt; p.x += p.vx * dt; p.y += p.vy * dt;
+        g.strokeStyle = rgba(p.col, 1 - p.life / p.max); g.lineWidth = 2;
+        g.beginPath(); g.moveTo(p.x, p.y); g.lineTo(p.x - p.vx * 0.025, p.y - p.vy * 0.025); g.stroke();
+      }
+      g.globalCompositeOperation = 'source-over';
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      for (let i = texts.length - 1; i >= 0; i--) {
+        const t = texts[i]; t.life += dt;
+        if (t.life > 0.5) { texts.splice(i, 1); continue; }
+        g.globalAlpha = 1 - t.life / 0.5;
+        g.font = `${Math.round(18 + 10 * (1 - t.life / 0.5))}px "Dela Gothic One", sans-serif`;
+        g.fillStyle = rgba(t.col, 1);
+        g.fillText(t.text, t.x, t.y - t.life * 60);
+        g.globalAlpha = 1;
+      }
+    }
+
+    // ----- drawing -----
+    function drawBackground(now, pulse, drop) {
+      const bg = g.createLinearGradient(0, 0, 0, H);
+      bg.addColorStop(0, rgba(INK, 1)); bg.addColorStop(1, rgba(INK2, 1));
+      g.fillStyle = bg; g.fillRect(0, 0, W, H);
+      // in the drops, the edges of the screen flash with the kick
+      if (drop && pulse > 0) {
+        const edge = g.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.3, W / 2, H / 2, Math.max(W, H) * 0.75);
+        edge.addColorStop(0, rgba(DISCS[1].rgb, 0)); edge.addColorStop(1, rgba(DISCS[Math.abs(Math.floor(now / SPB)) % 2].rgb, 0.25 * pulse));
+        g.fillStyle = edge; g.fillRect(0, 0, W, H);
+      }
+      // the track
+      const zs = [-0.2, 1.02];
+      g.beginPath();
+      g.moveTo(xOfUnit(-0.04, zs[0]), yOf(zs[0])); g.lineTo(xOfUnit(-0.04, zs[1]), yOf(zs[1]));
+      g.lineTo(xOfUnit(1.04, zs[1]), yOf(zs[1])); g.lineTo(xOfUnit(1.04, zs[0]), yOf(zs[0])); g.closePath();
+      g.fillStyle = rgba(INK, 0.75); g.fill();
+      // rails glow in each disc's colour
+      for (const [u, d] of [[-0.04, 0], [1.04, 1]]) {
+        g.strokeStyle = rgba(DISCS[d].rgb, 0.45 + 0.4 * pulse); g.lineWidth = 3;
+        g.beginPath(); g.moveTo(xOfUnit(u, zs[0]), yOf(zs[0])); g.lineTo(xOfUnit(u, zs[1]), yOf(zs[1])); g.stroke();
+      }
+      // pitch guides: one faint line per step of the scale
+      g.strokeStyle = rgba(PAPER, 0.05); g.lineWidth = 1;
+      for (let k = 0; k <= 8; k++) {
+        g.beginPath(); g.moveTo(xOfUnit(k / 8, 0), T.judgeY); g.lineTo(xOfUnit(k / 8, 1), yOf(1)); g.stroke();
+      }
+      // beat lines rushing down
+      const nb = now / SPB;
+      for (let b = Math.ceil(nb - 0.2); b <= nb + VIEW / SPB; b++) {
+        if (b < 0) continue;
+        const z = (b * SPB - now) / VIEW, y = yOf(z);
+        g.strokeStyle = rgba(PAPER, b % 4 === 0 ? 0.18 : 0.06); g.lineWidth = b % 4 === 0 ? 2 : 1;
+        g.beginPath(); g.moveTo(xOfUnit(-0.04, z), y); g.lineTo(xOfUnit(1.04, z), y); g.stroke();
+      }
+      // fog toward the horizon
+      const fog = g.createLinearGradient(0, yOf(1), 0, yOf(0.55));
+      fog.addColorStop(0, rgba(INK, 1)); fog.addColorStop(1, rgba(INK, 0));
+      g.fillStyle = fog; g.fillRect(0, 0, W, yOf(0.55));
+    }
+
+    function drawLaser(las, now) {
+      const nb = now / SPB, vb = VIEW / SPB;
+      const b0 = Math.max(las.start, nb - 0.08 * vb), b1 = Math.min(las.end, nb + vb * 1.02);
+      if (b1 <= b0) return;
+      const col = DISCS[las.d].rgb;
+      const beats = new Set([b0, b1]);
+      for (let b = Math.ceil(b0 * 8) / 8; b < b1; b += 0.125) beats.add(b);
+      for (const [pb] of las.pts) if (pb > b0 && pb < b1) beats.add(pb);
+      const pts = [];
+      for (const b of [...beats].sort((a, c) => a - c)) {
+        const z = (b * SPB - now) / VIEW;
+        const slam = las.slams.find((sl) => sl.beat === b);
+        if (slam) pts.push({ z, u: slam.from / 8, slamFrom: true }, { z, u: slam.to / 8 });
+        else pts.push({ z, u: stepAt(las, b) / 8 });
+      }
+      const half = (z) => T.w * 0.035 * persp(z);
+      for (let i = 0; i < pts.length - 1; i++) {
+        const p = pts[i], q = pts[i + 1];
+        const px = xOfUnit(p.u, p.z), py = yOf(p.z), qx = xOfUnit(q.u, q.z), qy = yOf(q.z);
+        // what has already gone under the line is dimmed
+        g.globalAlpha = p.z < 0 && q.z <= 0 ? 0.35 : 1;
+        if (p.z === q.z) {
+          // slam: a thick bar across, with an arrow showing which way to flick
+          const h = half(p.z) * 0.9, dir = Math.sign(qx - px);
+          g.globalCompositeOperation = 'lighter';
+          g.fillStyle = rgba(col, 0.35);
+          g.fillRect(Math.min(px, qx) - h, py - h * 2, Math.abs(qx - px) + h * 2, h * 4);
+          g.globalCompositeOperation = 'source-over';
+          g.fillStyle = rgba(col, 0.95);
+          g.fillRect(Math.min(px, qx), py - h, Math.abs(qx - px), h * 2);
+          g.fillStyle = rgba(PAPER, 0.95);
+          g.beginPath(); g.moveTo(qx + dir * h * 2.2, py); g.lineTo(qx - dir * h * 0.4, py - h * 2); g.lineTo(qx - dir * h * 0.4, py + h * 2); g.closePath(); g.fill();
+          continue;
+        }
+        const hp = half(p.z), hq = half(q.z);
+        g.beginPath();
+        g.moveTo(px - hp, py); g.lineTo(px + hp, py); g.lineTo(qx + hq, qy); g.lineTo(qx - hq, qy); g.closePath();
+        g.globalCompositeOperation = 'lighter';
+        g.fillStyle = rgba(col, 0.55); g.fill();
+        g.globalCompositeOperation = 'source-over';
+        g.strokeStyle = rgba(PAPER, 0.7); g.lineWidth = 1.5;
+        g.beginPath(); g.moveTo(px, py); g.lineTo(qx, qy); g.stroke();
+      }
+      g.globalAlpha = 1;
+      // a marker where a path begins, so you can be there in time
+      if (las.start * SPB > now) {
+        const z = (las.start * SPB - now) / VIEW, x = xOfUnit(las.pts[0][1] / 8, z), y = yOf(z), h = half(z) * 2.2;
+        g.fillStyle = rgba(col, 1);
+        g.beginPath(); g.moveTo(x, y + h * 0.6); g.lineTo(x - h, y - h * 0.6); g.lineTo(x + h, y - h * 0.6); g.closePath(); g.fill();
+      }
+    }
+
+    function drawCursors(now) {
+      const nb = now / SPB;
+      g.strokeStyle = rgba(PAPER, 0.75); g.lineWidth = 2;
+      g.beginPath(); g.moveTo(xOfUnit(-0.04, 0), T.judgeY); g.lineTo(xOfUnit(1.04, 0), T.judgeY); g.stroke();
+      for (const d of [0, 1]) {
+        const col = DISCS[d].rgb, x = xOfUnit(cursor[d], 0), y = T.judgeY;
+        const active = !!laserAt(d, nb), on = active && onPath(d, nb);
+        const beam = g.createLinearGradient(0, y - T.w * 0.5, 0, y);
+        beam.addColorStop(0, rgba(col, 0)); beam.addColorStop(1, rgba(col, on ? 0.45 : 0.15));
+        g.globalCompositeOperation = 'lighter';
+        g.fillStyle = beam; g.fillRect(x - 10, y - T.w * 0.5, 20, T.w * 0.5);
+        g.globalCompositeOperation = 'source-over';
+        const s = 16 + 6 * glow[d];
+        g.fillStyle = sour[d] > 0 && Math.floor(now * 20) % 2 ? rgba(MUTED, 1) : rgba(col, 1);
+        g.beginPath(); g.moveTo(x, y - 4); g.lineTo(x - s * 0.7, y + s); g.lineTo(x + s * 0.7, y + s); g.closePath(); g.fill();
+        g.strokeStyle = rgba(PAPER, 0.9); g.lineWidth = 1.5; g.stroke();
+      }
+    }
+
+    function drawDiscs(now) {
+      for (const d of [0, 1]) {
+        const [x, y] = discPos(d), r = T.discR, col = DISCS[d].rgb;
+        g.fillStyle = rgba(INK, 0.85);
+        g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill();
+        g.strokeStyle = rgba(col, 0.9); g.lineWidth = 4; g.stroke();
+        g.save(); g.translate(x, y); g.rotate(discAngle[d]);
+        g.strokeStyle = rgba(col, 0.45); g.lineWidth = 2;
+        for (let k = 0; k < 12; k++) { const a = (k * TAU) / 12; g.beginPath(); g.moveTo(Math.cos(a) * r * 0.62, Math.sin(a) * r * 0.62); g.lineTo(Math.cos(a) * r * 0.86, Math.sin(a) * r * 0.86); g.stroke(); }
+        g.fillStyle = rgba(PAPER, 0.95);
+        g.beginPath(); g.arc(0, -r * 0.74, r * 0.09, 0, TAU); g.fill();
+        g.restore();
+        g.fillStyle = rgba(col, 0.25 + 0.5 * glow[d]);
+        g.beginPath(); g.arc(x, y, r * 0.3, 0, TAU); g.fill();
+        g.fillStyle = rgba(PAPER, 0.8);
+        g.font = '700 12px "Zen Kaku Gothic New", sans-serif';
+        g.textAlign = 'center'; g.textBaseline = 'middle';
+        g.fillText(DISCS[d].hint, x, y + r + 14);
+      }
+    }
+
+    function drawCombo() {
+      if (S.combo < 10) return;
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillStyle = rgba(PAPER, 0.85);
+      g.font = `${Math.round(Math.min(44, T.w * 0.07))}px "Dela Gothic One", sans-serif`;
+      g.fillText(String(S.combo), T.cx, yOf(0.62));
+      g.font = '700 11px "Zen Kaku Gothic New", sans-serif';
+      g.fillStyle = rgba(PAPER, 0.45);
+      g.fillText('C H A I N', T.cx, yOf(0.62) + 28);
+    }
+
+    // ----- the two voices you play by moving -----
+    function makeVoices(A2) {
+      const { ac } = A2, now = ac.currentTime;
+      return [0, 1].map((d) => {
+        const f = ac.createBiquadFilter(); f.type = 'lowpass'; f.Q.value = 6; f.frequency.value = 900;
+        const gn = ac.createGain(); gn.gain.value = 0;
+        const o1 = ac.createOscillator(); o1.type = 'sawtooth';
+        const o2 = ac.createOscillator(); o2.type = d ? 'sawtooth' : 'square'; o2.detune.value = 10;
+        const o3 = ac.createOscillator(); o3.type = d ? 'triangle' : 'sine';
+        const g3 = ac.createGain(); g3.gain.value = 0.5;
+        o1.connect(f); o2.connect(f); o3.connect(g3).connect(f); f.connect(gn).connect(A2.bus.lead);
+        for (const o of [o1, o2, o3]) o.start(now);
+        return { o1, o2, o3, f, gn, d };
+      });
+    }
+    function driveVoices(now, pulse) {
+      if (!voices || !A) return;
+      const t = A.ac.currentTime, nb = now / SPB;
+      for (const v of voices) {
+        const active = !!laserAt(v.d, nb), on = active && onPath(v.d, nb);
+        const freq = A.mtof(midiAt(v.d, cursor[v.d] * 8));
+        v.o1.frequency.setTargetAtTime(freq, t, 0.012);
+        v.o2.frequency.setTargetAtTime(freq, t, 0.012);
+        v.o3.frequency.setTargetAtTime(v.d ? freq * 2 : freq / 2, t, 0.012);
+        // off the path the voice goes thin and out of tune
+        v.o2.detune.setTargetAtTime(on ? 10 : 70, t, 0.03);
+        v.f.frequency.setTargetAtTime(on ? 2400 + 2200 * pulse : 650, t, 0.02);
+        v.gn.gain.setTargetAtTime(active ? (on ? 0.13 : 0.05) : 0, t, active ? 0.015 : 0.06);
+      }
+    }
+    function zap(dir) {
+      if (!A) return;
+      const { ac } = A, at = ac.currentTime;
+      const f = ac.createBiquadFilter(); f.type = 'bandpass'; f.Q.value = 3;
+      f.frequency.setValueAtTime(dir > 0 ? 800 : 5000, at); f.frequency.exponentialRampToValueAtTime(dir > 0 ? 5000 : 800, at + 0.12);
+      A.noiseSrc(at, 0.15).connect(f).connect(A.decayGain(at, 0.25, 0.002, 0.13)).connect(A.bus.drum);
+    }
+
+    return {
+      id: 'enban', name: 'ENBAN', kind: '二つの円盤', kana: '円盤 ・ 回して判定を左右に動かす',
+      blurb: '二つの円盤を回して判定を左右に動かし、曲がりくねる光の道をなぞる。道の左右がそのまま音の高さ。',
+      lede: '二つの円盤で、それぞれの判定（三角）を左右に動かします。ノーツは<strong>すべて長い光の道</strong>で、判定を道に乗せ続けて取ります。道の<strong>左右の位置がそのまま音の高さ</strong>なので、なぞると旋律が鳴り、斜めの道は音が滑り、横に飛ぶ道（スラム）は音が跳ねます。外れると音が濁ります。',
+      keys: [
+        { label: 'A', name: '左を左へ', color: DISCS[0].color }, { label: 'D', name: '左を右へ', color: DISCS[0].color },
+        { label: '←', name: '右を左へ', color: DISCS[1].color }, { label: '→', name: '右を右へ', color: DISCS[1].color },
+      ],
+      how: [
+        ['パソコン', '左の円盤は <kbd>A</kbd> <kbd>D</kbd>、右の円盤は <kbd>←</kbd> <kbd>→</kbd>。マウスで円盤を回しても動きます'],
+        ['スマホ', '画面下の二つの円盤を、指でくるくる回す'],
+        ['スラム', '横に飛ぶ道は、その瞬間に矢印の向きへ弾く'],
+      ],
+      touchHint: '円盤は指やマウスで回せます',
+      meta: 'BPM 174 のドラムンベース ・ 44小節 ・ 約1分 ・ 道の左右は E マイナーペンタトニックの9段。右の円盤は左より1オクターブ高い声です。',
+      theme, titleColors: [DISCS[0].color, DISCS[1].color], comboOwn: true, attractFromBar: 20, input: 'line',
+      wantsKeys: ['KeyA', 'KeyD', 'ArrowLeft', 'ArrowRight'],
+      bpm: BPM, bars: 44, sections: SECTIONS, chords: CHORDS, chart: CHART,
+      lineOn: (n) => Math.abs(cursor[n.lane] - stepAt(n.laser, n.beat) / 8) <= TOL,
+      progressColor: (beat) => rgba(DISCS[Math.max(0, Math.floor(beat / 16)) % 2].rgb, 0.9),
+      onPointer(phase, e) {
+        if (phase === 'down') {
+          for (const d of [0, 1]) {
+            const [x, y] = discPos(d);
+            if (Math.hypot(e.clientX - x, e.clientY - y) <= T.discR * 1.4) drags.set(e.pointerId, { d, a: Math.atan2(e.clientY - y, e.clientX - x) });
+          }
+        } else if (phase === 'move') {
+          const dr = drags.get(e.pointerId);
+          if (!dr) return;
+          const [x, y] = discPos(dr.d), a = Math.atan2(e.clientY - y, e.clientX - x);
+          let da = a - dr.a;
+          if (da > Math.PI) da -= TAU; else if (da < -Math.PI) da += TAU;
+          dr.a = a;
+          moveCursor(dr.d, (da / TAU) * TURN);
+        } else drags.delete(e.pointerId);
+      },
+      onAudioStart(A2) { A = A2; voices = makeVoices(A2); },
+      onAudioStop() {
+        if (voices && A) { const t = A.ac.currentTime; for (const v of voices) { v.gn.gain.setTargetAtTime(0, t, 0.03); for (const o of [v.o1, v.o2, v.o3]) o.stop(t + 0.3); } }
+        voices = null;
+      },
+      song: {
+        leadMidi: () => null,
+        bass: { wave: 'sawtooth', subShift: -12, q: 6, open: 1600, close: 200 },
+        pad: { wave: 'sawtooth', cutoff: 1200, level: 0.04, detune: 14, attack: 0.3 },
+        delay: { beats: 0.75, feedback: 0.3, mix: 0.18 }, leadLevel: 0.6, leadSend: 0.25, padBus: 0.7,
+        instruments: {
+          // Reese bass: two detuned saws and a sub, through a filter wobbled by an LFO (`rate` in beats per wobble).
+          reese(A2, at, midi, dur, rate) {
+            const { ac } = A2, f0 = A2.mtof(midi);
+            const f = ac.createBiquadFilter(); f.type = 'lowpass'; f.Q.value = 8; f.frequency.value = 380;
+            const lfo = ac.createOscillator(); lfo.frequency.value = 1 / (rate * SPB);
+            const lg = ac.createGain(); lg.gain.value = rate < 1 ? 900 : 260;
+            lfo.connect(lg).connect(f.frequency);
+            const gn = ac.createGain();
+            gn.gain.setValueAtTime(0.0001, at); gn.gain.exponentialRampToValueAtTime(0.26, at + 0.01);
+            gn.gain.setValueAtTime(0.26, at + dur - 0.04); gn.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+            f.connect(gn).connect(A2.bus.bass);
+            const oscs = [];
+            for (const det of [-14, 14]) { const o = ac.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f0; o.detune.value = det; o.connect(f); oscs.push(o); }
+            const sub = ac.createOscillator(); sub.type = 'sine'; sub.frequency.value = f0 / 2;
+            const sg = ac.createGain(); sg.gain.value = 0.9; sub.connect(sg).connect(gn); oscs.push(sub);
+            for (const o of [...oscs, lfo]) { o.start(at); o.stop(at + dur + 0.02); }
+          },
+        },
+        arrange(add, bar, b0, ch, name) {
+          // two-step break: kick on 1 and the "and" of 3, snare on 2 and 4
+          const twoStep = (ghosts) => {
+            add(b0, 'kick'); add(b0 + 2.5, 'kick');
+            add(b0 + 1, 'snare'); add(b0 + 3, 'snare');
+            if (ghosts) { add(b0 + 1.75, 'kick'); add(b0 + 3.75, 'snare'); }
+          };
+          if (name === 'INTRO') {
+            if (bar >= 2) for (let i = 0; i < 8; i++) add(b0 + i / 2, 'hat', false);
+          } else if (name === 'RISE') {
+            twoStep(false);
+            for (let i = 0; i < 8; i++) add(b0 + i / 2, 'hat', false);
+            add(b0, 'reese', ch.bass, 4 * SPB, 2);
+          } else if (name === 'BUILD') {
+            if (bar === 12) add(b0, 'crash');
+            if (bar < 16) { twoStep(true); for (let i = 0; i < 16; i++) add(b0 + i / 4, 'hat', false); add(b0, 'reese', ch.bass, 4 * SPB, 1); }
+            else {
+              const div = bar < 18 ? 2 : 4;
+              for (let i = 0; i < 4 * div; i++) add(b0 + i / div, 'snare');
+              if (bar >= 18) for (let i = 0; i < 4; i++) add(b0 + i, 'kick');
+              if (bar < 19) add(b0, 'reese', ch.bass, 4 * SPB, 1 / div);
+            }
+          } else if (name === 'DROP' || name === 'DROP II') {
+            if (bar % 4 === 0) add(b0, 'crash');
+            twoStep(true);
+            for (let i = 0; i < 16; i++) add(b0 + i / 4, 'hat', i % 4 === 2);
+            add(b0, 'reese', ch.bass, 4 * SPB, name === 'DROP' ? 0.5 : 0.25);
+          } else if (name === 'BREAK') {
+            for (let i = 0; i < 4; i++) add(b0 + i + 0.5, 'hat', false);
+            add(b0, 'reese', ch.bass, 4 * SPB, 4);
+            if (bar === 31) { for (let i = 0; i < 4; i++) add(b0 + i, 'kick'); for (let i = 8; i < 16; i++) add(b0 + i / 4, 'snare'); }
+          } else if (name === 'OUTRO') {
+            if (bar === 40) add(b0, 'crash');
+            if (bar <= 41) twoStep(false);
+            if (bar <= 42) add(b0, 'reese', ch.bass, 4 * SPB, 2);
+          }
+        },
+      },
+      layout(w, h, snap) {
+        W = w; H = h;
+        let x0 = 0;
+        if (kit.wide()) x0 = Math.max(W * 0.42, 560);
+        const aw = W - x0;
+        TG.discR = Math.max(34, Math.min(80, aw * 0.11, H * 0.1));
+        TG.x0 = x0; TG.cx = x0 + aw / 2;
+        TG.judgeY = H - TG.discR * 2 - 50;
+        TG.topY = Math.max(70, H * 0.08);
+        TG.w = Math.min(aw - 40, (TG.judgeY - TG.topY) * 1.2, 760);
+        if (snap) Object.assign(T, TG);
+      },
+      update(now, dt) {
+        VIEW = kit.view(1.3);
+        const k = Math.min(1, dt * 4);
+        for (const key of ['x0', 'cx', 'judgeY', 'topY', 'w', 'discR']) T[key] += (TG[key] - T[key]) * k;
+        const nb = now / SPB;
+        for (const d of [0, 1]) { glow[d] = Math.max(0, glow[d] - dt * 4); sour[d] = Math.max(0, sour[d] - dt * 3); }
+        shake = Math.max(0, shake - dt * 30);
+        if (S.auto) {
+          // autoplay rides each path, and drifts to the start of the next one ahead of time
+          for (const d of [0, 1]) {
+            const las = laserAt(d, nb) || LASERS[d].find((l) => l.start > nb && (l.start - nb) * SPB < 0.6);
+            if (!las) continue;
+            const target = las.start > nb ? las.pts[0][1] / 8 : stepAt(las, nb) / 8;
+            const before = cursor[d];
+            cursor[d] = las.start > nb ? before + (target - before) * Math.min(1, dt * 8) : target;
+            discAngle[d] += ((cursor[d] - before) * TAU) / TURN;
+          }
+        } else if (kit.playing()) {
+          for (const d of [0, 1]) {
+            const [lk, rk] = DISCS[d].keys;
+            const v = (kit.keys.has(rk) ? 1 : 0) - (kit.keys.has(lk) ? 1 : 0);
+            if (v) moveCursor(d, v * KEY_SPEED * dt);
+          }
+          // a slam is caught by moving that disc the right way around its moment; the cursor then jumps across
+          const pnow = performance.now() / 1000;
+          for (const sl of SLAMS) {
+            if (slamDone.has(sl) || Math.abs(sl.t - now) > 0.15) continue;
+            if (intent[sl.d].dir === sl.dir && pnow - intent[sl.d].at < 0.12) {
+              slamDone.add(sl);
+              const before = cursor[sl.d];
+              cursor[sl.d] = sl.to / 8;
+              discAngle[sl.d] += ((cursor[sl.d] - before) * TAU) / TURN;
+            }
+          }
+        }
+        const beat = now / SPB, bar = Math.floor(beat / 4);
+        const name = SECTIONS[kit.secIndex(SECTIONS, bar)].name;
+        driveVoices(now, kit.pulse(beat, name.startsWith('DROP')));
+      },
+      draw(now, dt) {
+        const beat = now / SPB, bar = Math.floor(beat / 4);
+        const name = SECTIONS[kit.secIndex(SECTIONS, Math.max(0, bar))].name;
+        const drop = name.startsWith('DROP');
+        const pulse = kit.pulse(beat, name !== 'INTRO' && name !== 'BREAK');
+        g.save();
+        if (shake > 0) g.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
+        drawBackground(now, pulse, drop);
+        if (kit.playing()) drawCombo();
+        for (const d of [0, 1]) for (const las of LASERS[d]) drawLaser(las, now);
+        drawCursors(now);
+        drawEffects(dt);
+        g.restore();
+        drawDiscs(now);
+      },
+      onJudge(n, grade) {
+        const d = n.lane, x = xOfUnit(cursor[d], 0);
+        if (grade === 'miss') { sour[d] = 1; return; }
+        glow[d] = 1;
+        if (n.slam) {
+          burst(x, T.judgeY, DISCS[d].rgb, 24, 1.3);
+          texts.push({ text: 'SLAM', x, y: T.judgeY - 40, col: DISCS[d].rgb, life: 0 });
+          if (!kit.reduceMotion) shake = Math.max(shake, 7);
+          if (!S.attract) zap(n.laser.slams.find((sl) => Math.abs(sl.beat - n.beat) < 1e-6)?.dir || 1);
+        } else if (Math.random() < 0.35) burst(x, T.judgeY, DISCS[d].rgb, 3, 0.6);
+      },
+      debug: { cursor, laserAt, stepAt, SLAMS, SPB },
+      onNewRun() {
+        sparks.length = 0; texts.length = 0; drags.clear(); slamDone = new Set(); shake = 0;
+        cursor[0] = 0.25; cursor[1] = 0.75; glow.fill(0); sour.fill(0);
+        intent[0].dir = intent[1].dir = 0;
+      },
+    };
+  });
+
   // =====================================================================
   //  BOOT
   // =====================================================================
@@ -4449,7 +5026,7 @@
   requestAnimationFrame(frame);
   if (document.fonts && document.fonts.load) document.fonts.load('20px "Dela Gothic One"').catch(() => {});
   // test hook
-  window.__lab = { S, MODES, get mode() { return M; }, showTitle, startGame, showMenu };
+  window.__lab = { S, MODES, get mode() { return M; }, showTitle, startGame, showMenu, now: () => (S.screen === 'play' ? audio.songTime() : null) };
 })();
 </script>
 </body>
