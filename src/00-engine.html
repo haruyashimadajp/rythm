@@ -1,0 +1,822 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MINAMO</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=Zen+Kaku+Gothic+New:wght@400;700&display=swap">
+<style>
+  :root {
+    /* Layout: full-bleed canvas (the water surface) owned by the current song; HTML panels float over it.
+       Each song sets these tokens when it is selected; these are the menu defaults. */
+    --ink: #04121a;
+    --ink-2: #0a2a38;
+    --panel: rgba(4, 18, 26, 0.84);
+    --paper: #eaf6f7;
+    --muted: #93b2ba;
+    --line: rgba(234, 246, 247, 0.16);
+    --accent: #ffd36e;
+    --font-display: "Dela Gothic One", "Zen Kaku Gothic New", "Hiragino Sans", sans-serif;
+    --font-body: "Zen Kaku Gothic New", "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+    color-scheme: dark;
+  }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; margin: 0; overflow: hidden; background: var(--ink); color: var(--paper); font-family: var(--font-body); }
+  canvas#stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+  canvas#stage.aiming { cursor: none; }
+
+  .panel-wrap {
+    position: fixed; inset: 0; display: flex; align-items: flex-end; justify-content: flex-start;
+    padding-block: max(20px, env(safe-area-inset-top, 0px)) max(20px, env(safe-area-inset-bottom, 0px));
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    pointer-events: none; box-sizing: border-box;
+  }
+  .panel {
+    pointer-events: auto; width: min(440px, 100%); max-height: 100%; overflow-y: auto; box-sizing: border-box;
+    background: var(--panel); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--line); border-radius: 14px; padding: 22px 22px 18px;
+    display: grid; gap: 16px; align-content: start;
+  }
+  .brand { display: grid; gap: 4px; }
+  h1 { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: 2.6rem; line-height: 1; letter-spacing: 0.06em; text-wrap: balance; }
+  .sub { margin: 0; color: var(--muted); font-size: 0.86rem; letter-spacing: 0.08em; }
+  .lede { margin: 0; line-height: 1.75; font-size: 0.95rem; }
+  .lede strong { color: var(--accent); font-weight: 700; }
+  .eyebrow { margin: 0; font-size: 0.74rem; letter-spacing: 0.24em; color: var(--muted); }
+
+  .songs { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+  .song-card {
+    width: 100%; text-align: left; display: grid; grid-template-columns: 2.2em 1fr auto; gap: 2px 10px; align-items: center;
+    padding: 10px 14px; border-radius: 10px; border: 1px solid var(--line); background: transparent; color: var(--paper);
+    font: inherit; cursor: pointer;
+  }
+  .song-card:hover, .song-card:focus-visible { border-color: var(--paper); background: rgba(255, 255, 255, 0.05); }
+  .song-card .sc-no { grid-row: 1 / 3; font-family: var(--font-display); font-size: 1.2rem; color: var(--sc); }
+  .song-card .sc-title { font-family: var(--font-display); font-size: 1.1rem; letter-spacing: 0.05em; }
+  .song-card .sc-title small { font-family: var(--font-body); font-weight: 700; font-size: 0.8rem; color: var(--muted); margin-left: 6px; letter-spacing: 0.1em; }
+  .song-card .sc-genre { grid-column: 2; font-size: 0.78rem; color: var(--muted); }
+  .song-card .sc-side { grid-column: 3; grid-row: 1 / 3; display: grid; justify-items: end; gap: 3px; }
+  .song-card .sc-best { font-size: 0.72rem; color: var(--sc); font-weight: 700; letter-spacing: 0.06em; }
+  .lv { display: flex; gap: 3px; }
+  .lv i { width: 6px; height: 10px; border-radius: 2px; background: rgba(255, 255, 255, 0.14); display: block; }
+  .lv i.on { background: var(--sc); }
+
+  .chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+  .chips li { font-size: 0.76rem; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .chips li b { color: var(--paper); font-weight: 700; margin-left: 4px; }
+  .how { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: 0.84rem; line-height: 1.6; }
+  .how li { display: grid; grid-template-columns: 5.5em 1fr; gap: 8px; }
+  .how b { color: var(--accent); font-weight: 700; }
+  .how kbd { font-family: var(--font-display); font-size: 0.85em; padding: 0 5px; border: 1px solid var(--line); border-radius: 5px; }
+
+  .settings { display: grid; gap: 10px; }
+  .row { display: grid; grid-template-columns: 8.5em 1fr 4.2em; align-items: center; gap: 10px; font-size: 0.86rem; }
+  .row output { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .row small { grid-column: 2 / 4; color: var(--muted); font-size: 0.74rem; margin-top: -6px; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .check { display: flex; align-items: center; gap: 8px; font-size: 0.86rem; cursor: pointer; }
+  .check input { accent-color: var(--accent); width: 16px; height: 16px; }
+
+  .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; }
+  button.btn {
+    font: inherit; font-weight: 700; cursor: pointer; border-radius: 999px; padding: 10px 20px;
+    border: 1.5px solid var(--line); background: transparent; color: var(--paper);
+  }
+  button.btn.primary { background: var(--paper); color: var(--ink); border-color: var(--paper); }
+  button.btn:hover { border-color: var(--paper); }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .hint { margin: 0; color: var(--muted); font-size: 0.76rem; }
+  .best { margin: 0; color: var(--muted); font-size: 0.8rem; border-top: 1px solid var(--line); padding-top: 12px; }
+  .best b { color: var(--accent); }
+
+  .result-head { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+  .rank { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: 4rem; line-height: 1; color: var(--accent); }
+  .score { font-family: var(--font-display); font-size: 2rem; font-variant-numeric: tabular-nums; }
+  .badge { margin: 0; font-family: var(--font-display); letter-spacing: 0.12em; color: var(--accent); font-size: 1rem; }
+  .stats { margin: 0; display: grid; grid-template-columns: 1fr auto; gap: 6px 16px; font-size: 0.9rem; }
+  .stats dt { color: var(--muted); letter-spacing: 0.08em; }
+  .stats dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
+
+  @media (min-width: 900px) {
+    .panel-wrap { align-items: center; padding-left: max(48px, env(safe-area-inset-left, 0px)); }
+  }
+  @media (max-height: 700px) and (max-width: 899px) {
+    #titleWrap .lede, #titleWrap .how, #menuWrap .lede { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .panel { backdrop-filter: none; -webkit-backdrop-filter: none; }
+  }
+</style>
+</head>
+<body>
+<canvas id="stage" aria-label="水面"></canvas>
+
+<div class="panel-wrap" id="menuWrap">
+  <section class="panel" aria-labelledby="gameTitle">
+    <div class="brand">
+      <h1 id="gameTitle">MINAMO</h1>
+      <p class="sub" id="gameSub">水面のリズム</p>
+    </div>
+    <p class="lede">雫が落ちて広がる波紋が、水面に浮かぶノーツに<strong>届いた瞬間</strong>に叩く音楽ゲームです。曲を選んでください。</p>
+    <ul class="songs" id="songList" aria-label="曲"></ul>
+  </section>
+</div>
+
+<div class="panel-wrap" id="titleWrap" hidden>
+  <section class="panel" aria-labelledby="songTitle">
+    <div class="brand">
+      <p class="eyebrow" id="songNo"></p>
+      <h1 id="songTitle"></h1>
+      <p class="sub" id="songSub"></p>
+    </div>
+    <p class="lede" id="songLede"></p>
+    <ul class="chips" id="songChips"></ul>
+    <ul class="how">
+      <li><b>パソコン</b><span>マウスでノーツに合わせ、<kbd>Z</kbd> <kbd>X</kbd> かクリックで叩く</span></li>
+      <li><b>スマホ</b><span>ノーツを直接タップ</span></li>
+      <li><b>長押し</b><span>波紋と一緒に動く光を、押したまま追いかける</span></li>
+      <li><b>水切り</b><span>跳ねてくる石が着水する点を叩く</span></li>
+    </ul>
+    <div class="settings">
+      <div class="row">
+        <label for="speed">ハイスピード</label>
+        <input type="range" id="speed" min="0.6" max="2.4" step="0.1" value="1">
+        <output id="speedOut" for="speed">1.0</output>
+        <small>ノーツが浮かび上がる早さ（波紋の速さは曲で決まっています）</small>
+      </div>
+      <div class="row">
+        <label for="offset">判定オフセット</label>
+        <input type="range" id="offset" min="-200" max="200" step="5" value="0">
+        <output id="offsetOut" for="offset">0 ms</output>
+        <small>音が遅れて聞こえるときは ＋ 側へ</small>
+      </div>
+      <label class="check"><input type="checkbox" id="auto"> オートプレイで見る</label>
+    </div>
+    <div class="actions">
+      <button class="btn primary" id="startBtn" type="button">演奏する</button>
+      <button class="btn" id="menuBtn" type="button">← 曲選択へ</button>
+    </div>
+    <p class="hint">Space で開始 ・ プレイ中は Esc で中断</p>
+    <p class="best" id="songBest"></p>
+  </section>
+</div>
+
+<div class="panel-wrap" id="resultWrap" hidden>
+  <section class="panel" aria-labelledby="resRank">
+    <p class="eyebrow" id="resSong">RESULT</p>
+    <div class="result-head">
+      <h2 class="rank" id="resRank">S</h2>
+      <div class="score" id="resScore">0</div>
+    </div>
+    <p class="badge" id="resBadge" hidden></p>
+    <dl class="stats">
+      <dt>PERFECT</dt><dd id="resPerfect">0</dd>
+      <dt>GREAT</dt><dd id="resGreat">0</dd>
+      <dt>GOOD</dt><dd id="resGood">0</dd>
+      <dt>MISS</dt><dd id="resMiss">0</dd>
+      <dt>MAX COMBO</dt><dd id="resCombo">0</dd>
+    </dl>
+    <p class="best" id="resBest"></p>
+    <div class="actions">
+      <button class="btn primary" id="againBtn" type="button">もう一度</button>
+      <button class="btn" id="nextBtn" type="button">次の曲</button>
+      <button class="btn" id="resMenuBtn" type="button">曲選択へ</button>
+    </div>
+  </section>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  // =====================================================================
+  //  ENGINE
+  //  Settings, panels, judging, aim input, audio and the main loop.
+  //  A song supplies its chart, music, layout and drawing (see the
+  //  FIELD section for the shared water surface, then one block per song).
+  // =====================================================================
+
+  const TAU = Math.PI * 2, DEG = Math.PI / 180;
+  const $ = (s) => document.querySelector(s);
+  const cv = $('#stage');
+  const g = cv.getContext('2d');
+  let W = 0, H = 0, DPR = 1;
+  const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+  const hex = (h) => { h = h.replace('#', ''); return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16)); };
+  const mix = (a, b, k) => a.map((v, i) => Math.round(v + (b[i] - v) * k));
+  function mulberry32(a) {
+    return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  }
+  // a stable pseudo-random number in [0, 1) for an integer key
+  const hash = (k) => mulberry32(Math.imul(k | 0, 2654435761) ^ 0x5bd1e995)();
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // ----- Settings and best scores (both stay on this device) -----
+  const settings = { speed: 1, offset: 0, auto: false };
+  const load = (key, into) => { try { Object.assign(into, JSON.parse(localStorage.getItem(key) || '{}')); } catch (e) { /* storage unavailable */ } };
+  const save = (key, v) => { try { localStorage.setItem(key, JSON.stringify(v)); } catch (e) { /* ignore */ } };
+  load('minamo.settings', settings);
+  const best = {};
+  load('minamo.best', best);
+
+  // ----- Run state -----
+  const S = {
+    screen: 'menu', notes: [], cursor: 0, auto: true, attract: true,
+    combo: 0, maxCombo: 0, counts: { perfect: 0, great: 0, good: 0, miss: 0 }, weight: 0,
+    attractT0: 0, aim: { x: 0, y: 0 }, touch: false,
+  };
+  const WIN = { perfect: 0.045, great: 0.09, good: 0.135 };
+  const WEIGHT = { perfect: 1, great: 0.7, good: 0.4, miss: 0 };
+  const SONGS = [];
+  let M = null; // the song on screen
+  const byChart = new Map(); // chart note -> this run's note
+
+  // What a song gets to work with.
+  const kit = {
+    g, rgba, hex, mix, hash, mulberry32, TAU, DEG, S, settings, reduceMotion, WIN,
+    get W() { return W; }, get H() { return H; },
+    playing: () => S.screen === 'play',
+    // wide screens keep the panel on the left outside of play, so songs shift their field right
+    wide: () => W >= 900 && S.screen !== 'play',
+    view: (base) => base / settings.speed,
+    runOf: (c) => byChart.get(c),
+    holding: (n) => n.holding !== null,
+    secIndex(sections, bar) {
+      let i = 0;
+      for (let k = 0; k < sections.length; k++) if (sections[k].bar <= bar) i = k;
+      return i;
+    },
+    sortChart: (chart) => chart.sort((a, b) => a.t - b.t),
+    // a soft kick pulse: 1 on the beat, fading through it
+    pulse(beat, on) { return beat >= 0 && on ? Math.exp(-(beat - Math.floor(beat)) * 5) : 0; },
+  };
+
+  function defineSong(factory) {
+    const m = factory(kit);
+    m.bpb = m.beatsPerBar || 4;
+    m.spb = 60 / m.bpm;
+    m.songEnd = m.bars * m.bpb * m.spb + 0.8;
+    m.totalJudges = m.chart.reduce((n, c) => n + (c.dur > 0 ? 2 : 1), 0);
+    m.no = SONGS.length + 1;
+    SONGS.push(m);
+  }
+
+  // ===== Judging =====
+  const gradeOf = (adt) => (adt <= WIN.perfect ? 'perfect' : adt <= WIN.great ? 'great' : 'good');
+
+  function newRun(auto, attract) {
+    byChart.clear();
+    S.notes = M.chart.map((c) => { const n = { ...c, src: c, end: c.t + c.dur, head: null, tail: null, holding: null, off: 0 }; byChart.set(c, n); return n; });
+    S.cursor = 0; S.auto = auto; S.attract = attract;
+    S.combo = 0; S.maxCombo = 0; S.weight = 0;
+    S.counts = { perfect: 0, great: 0, good: 0, miss: 0 };
+    aimPointers.clear();
+    if (M.onNewRun) M.onNewRun();
+    cv.classList.toggle('aiming', !auto && !attract);
+  }
+
+  function judge(n, grade, now) {
+    S.counts[grade]++;
+    S.weight += WEIGHT[grade];
+    if (grade === 'miss') S.combo = 0;
+    else { S.combo++; S.maxCombo = Math.max(S.maxCombo, S.combo); }
+    if (M.onJudge) M.onJudge(n, grade, now);
+  }
+
+  // Strike the earliest note under the aim; a hold remembers `token` so its release can end it.
+  function press(token, now) {
+    const p = aimOf(token);
+    for (let i = S.cursor; i < S.notes.length; i++) {
+      const n = S.notes[i];
+      if (n.t > now + WIN.good) break;
+      if (n.head || !M.hitTest(n, p.x, p.y)) continue;
+      const dt = now - n.t;
+      if (Math.abs(dt) > WIN.good) continue;
+      n.head = gradeOf(Math.abs(dt));
+      judge(n, n.head, now);
+      if (!S.attract && !S.auto) audio.tick();
+      if (n.dur > 0) n.holding = token;
+      return true;
+    }
+    return false;
+  }
+
+  function release(token, now) {
+    for (let i = S.cursor; i < S.notes.length; i++) {
+      const n = S.notes[i];
+      if (n.t > now) break;
+      if (n.holding !== token) continue;
+      n.holding = null;
+      n.tail = now >= n.end - 0.12 ? 'perfect' : 'miss';
+      judge(n, n.tail, now);
+    }
+  }
+
+  function updateJudge(now, dt) {
+    for (let i = S.cursor; i < S.notes.length; i++) {
+      const n = S.notes[i];
+      if (n.t > now + WIN.good) break;
+      if (S.auto && !n.head && n.t <= now) {
+        n.head = 'perfect'; judge(n, 'perfect', now);
+        if (n.dur > 0) n.holding = 'auto';
+      }
+      if (!n.head && now - n.t > WIN.good) {
+        n.head = 'miss'; judge(n, 'miss', now);
+        if (n.dur > 0) { n.tail = 'miss'; judge(n, 'miss', now); }
+      }
+      if (n.holding !== null) {
+        if (now >= n.end) { n.holding = null; n.tail = 'perfect'; judge(n, 'perfect', now); }
+        else if (n.holding !== 'auto') {
+          // the aim has to stay on the moving hold point
+          const [x, y] = M.followPos(n, now), p = aimOf(n.holding);
+          n.off = Math.hypot(x - p.x, y - p.y) <= M.followReach() ? 0 : n.off + dt;
+          if (n.off > 0.2) { n.holding = null; n.tail = 'miss'; judge(n, 'miss', now); }
+        }
+      }
+    }
+    while (S.cursor < S.notes.length) {
+      const n = S.notes[S.cursor];
+      if (n.head && (n.dur === 0 || n.tail)) S.cursor++; else break;
+    }
+  }
+
+  // ===== Audio =====
+  // A shared synth kit; each song adds its own voices and arrangement (see song.song).
+  const audio = (() => {
+    let ac = null, master = null, noise = null, reverbIn = null, out = null, bus = null, padV = 0.85;
+    const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
+
+    function init() {
+      ac = new (window.AudioContext || window.webkitAudioContext)();
+      const comp = ac.createDynamicsCompressor();
+      comp.threshold.value = -14; comp.ratio.value = 4; comp.attack.value = 0.004; comp.release.value = 0.2;
+      comp.connect(ac.destination);
+      master = ac.createGain(); master.gain.value = 0.75; master.connect(comp);
+      const len = ac.sampleRate;
+      noise = ac.createBuffer(1, len, ac.sampleRate);
+      const nd = noise.getChannelData(0);
+      for (let i = 0; i < len; i++) nd[i] = Math.random() * 2 - 1;
+      const irLen = Math.floor(ac.sampleRate * 2.4);
+      const ir = ac.createBuffer(2, irLen, ac.sampleRate);
+      for (let ch = 0; ch < 2; ch++) { const d = ir.getChannelData(ch); for (let i = 0; i < irLen; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / irLen, 3); }
+      const rev = ac.createConvolver(); rev.buffer = ir;
+      const revOut = ac.createGain(); revOut.gain.value = 0.3;
+      rev.connect(revOut); revOut.connect(master);
+      reverbIn = rev;
+    }
+
+    function newRun(song) {
+      if (out) { out.gain.setValueAtTime(0, ac.currentTime); setTimeout(((o) => () => o.disconnect())(out), 200); }
+      out = ac.createGain(); out.connect(master);
+      padV = song.padBus ?? 0.85;
+      const mkBus = (v) => { const b = ac.createGain(); b.gain.value = v; b.connect(out); return b; };
+      bus = { drum: mkBus(song.drumLevel ?? 0.88), bass: mkBus(song.bassLevel ?? 0.76), pad: mkBus(padV), lead: mkBus(song.leadLevel ?? 0.55), fx: mkBus(0.7) };
+      const send = ac.createGain(); send.gain.value = 0.55; send.connect(reverbIn);
+      bus.pad.connect(send);
+      const leadSend = ac.createGain(); leadSend.gain.value = song.leadSend ?? 0.35; bus.lead.connect(leadSend); leadSend.connect(reverbIn);
+      const fxSend = ac.createGain(); fxSend.gain.value = 0.5; bus.fx.connect(fxSend); fxSend.connect(reverbIn);
+      if (song.delay) {
+        const delay = ac.createDelay(1); delay.delayTime.value = M.spb * song.delay.beats;
+        const fb = ac.createGain(); fb.gain.value = song.delay.feedback;
+        const dOut = ac.createGain(); dOut.gain.value = song.delay.mix;
+        bus.lead.connect(delay); delay.connect(fb); fb.connect(delay); delay.connect(dOut); dOut.connect(out);
+      }
+    }
+
+    const decayGain = (at, peak, attack, decay) => {
+      const gn = ac.createGain();
+      gn.gain.setValueAtTime(0.0001, at);
+      gn.gain.exponentialRampToValueAtTime(peak, at + attack);
+      gn.gain.exponentialRampToValueAtTime(0.0001, at + attack + decay);
+      return gn;
+    };
+    const noiseSrc = (at, dur) => { const s = ac.createBufferSource(); s.buffer = noise; s.loop = dur > 0.9; s.start(at, Math.random() * 0.5); s.stop(at + dur); return s; };
+    const osc = (type, freq, at, dur) => { const o = ac.createOscillator(); o.type = type; o.frequency.value = freq; o.start(at); o.stop(at + dur); return o; };
+    const filter = (type, freq, q = 0.7) => { const f = ac.createBiquadFilter(); f.type = type; f.frequency.value = freq; f.Q.value = q; return f; };
+    // handed to a song's own voices
+    const A = { get ac() { return ac; }, get bus() { return bus; }, get reverbIn() { return reverbIn; }, get noise() { return noise; }, decayGain, noiseSrc, osc, filter, mtof };
+
+    const I = {
+      kick(at, level = 1) {
+        const k = M.song.kick || {};
+        const o = ac.createOscillator(), gn = ac.createGain();
+        o.frequency.setValueAtTime(k.from ?? 155, at); o.frequency.exponentialRampToValueAtTime(k.to ?? 44, at + (k.sweep ?? 0.13));
+        gn.gain.setValueAtTime(level * (k.level ?? 1), at); gn.gain.exponentialRampToValueAtTime(0.001, at + (k.decay ?? 0.4));
+        o.connect(gn).connect(bus.drum); o.start(at); o.stop(at + (k.decay ?? 0.4) + 0.03);
+        if (k.click) { const c = filter('highpass', 2500); noiseSrc(at, 0.02).connect(c).connect(decayGain(at, 0.25 * k.click, 0.001, 0.012)).connect(bus.drum); }
+        // sidechain feel: the pad ducks under every kick
+        bus.pad.gain.setValueAtTime(padV * 0.38, at); bus.pad.gain.linearRampToValueAtTime(padV, at + 0.28);
+      },
+      snare(at, level = 1) {
+        const s = M.song.snare || {};
+        const f = filter('bandpass', s.tone ?? 1900);
+        noiseSrc(at, 0.3).connect(f).connect(decayGain(at, 0.52 * level, 0.002, s.decay ?? 0.17)).connect(bus.drum);
+        const o = osc('triangle', s.body ?? 190, at, 0.11);
+        o.connect(decayGain(at, 0.28 * level, 0.002, 0.07)).connect(bus.drum);
+      },
+      clap(at, level = 1) {
+        const f = filter('bandpass', 1300, 1.2);
+        const gn = ac.createGain(); gn.gain.value = 0;
+        // three quick slaps and a tail
+        for (const [d, v] of [[0, 0.5], [0.011, 0.45], [0.022, 0.55]]) { gn.gain.setValueAtTime(v * level, at + d); gn.gain.exponentialRampToValueAtTime(0.02, at + d + 0.009); }
+        gn.gain.setValueAtTime(0.4 * level, at + 0.033); gn.gain.exponentialRampToValueAtTime(0.0001, at + 0.22);
+        noiseSrc(at, 0.25).connect(f).connect(gn); gn.connect(bus.drum);
+        const s = ac.createGain(); s.gain.value = 0.25; gn.connect(s).connect(reverbIn);
+      },
+      hat(at, open, level = 1) {
+        const f = filter('highpass', 7300);
+        noiseSrc(at, open ? 0.3 : 0.08).connect(f).connect(decayGain(at, (open ? 0.14 : 0.1) * level, 0.001, open ? 0.21 : 0.045)).connect(bus.drum);
+      },
+      crash(at) {
+        const f = filter('highpass', 3800);
+        const gn = decayGain(at, 0.19, 0.002, 1.6);
+        noiseSrc(at, 1.7).connect(f).connect(gn); gn.connect(bus.drum); gn.connect(reverbIn);
+      },
+      rim(at) {
+        const f = filter('bandpass', 1600);
+        osc('square', 820, at, 0.05).connect(f).connect(decayGain(at, 0.12, 0.001, 0.03)).connect(bus.drum);
+      },
+      shaker(at, level = 1) {
+        const f = filter('bandpass', 6500, 1.2);
+        noiseSrc(at, 0.08).connect(f).connect(decayGain(at, 0.12 * level, 0.012, 0.05)).connect(bus.drum);
+      },
+      // a noise swell that rises into the next section
+      riser(at, dur) {
+        const f = filter('bandpass', 400, 2);
+        f.frequency.setValueAtTime(400, at); f.frequency.exponentialRampToValueAtTime(7000, at + dur);
+        const gn = ac.createGain(); gn.gain.setValueAtTime(0.0001, at); gn.gain.exponentialRampToValueAtTime(0.16, at + dur); gn.gain.linearRampToValueAtTime(0, at + dur + 0.05);
+        noiseSrc(at, dur + 0.1).connect(f).connect(gn).connect(bus.fx);
+      },
+      bass(at, midi, dur) {
+        const b = M.song.bass || {};
+        const f = filter('lowpass', b.open ?? 1300, b.q ?? 5);
+        f.frequency.setValueAtTime(b.open ?? 1300, at); f.frequency.exponentialRampToValueAtTime(b.close ?? 220, at + Math.max(0.08, dur * 0.9));
+        const gn = decayGain(at, 0.32, 0.005, dur);
+        const o = osc(b.wave || 'sawtooth', mtof(midi + (b.shift ?? 0)), at, dur + 0.05);
+        const sub = osc('sine', mtof(midi + (b.subShift ?? -12)), at, dur + 0.05);
+        const sg = ac.createGain(); sg.gain.value = b.sub ?? 0.6;
+        o.connect(f); f.connect(gn); sub.connect(sg).connect(gn); gn.connect(bus.bass);
+      },
+      pad(at, midis, dur) {
+        const p = M.song.pad || {};
+        const level = p.level ?? 0.05, attack = p.attack ?? 0.35;
+        const f = filter('lowpass', p.cutoff ?? 1150);
+        const gn = ac.createGain();
+        gn.gain.setValueAtTime(0, at); gn.gain.linearRampToValueAtTime(level, at + attack);
+        gn.gain.setValueAtTime(level, at + dur - 0.05); gn.gain.linearRampToValueAtTime(0, at + dur + 0.45);
+        f.connect(gn).connect(bus.pad);
+        for (const m of midis) for (const det of [-(p.detune ?? 9), p.detune ?? 9]) {
+          const o = osc(p.wave || 'sawtooth', mtof(m), at, dur + 0.5); o.detune.value = det;
+          o.connect(f);
+        }
+      },
+      lead(at, midi, dur) { M.song.lead(A, at, midi, dur); },
+    };
+
+    // Arrangement -> time-sorted events (song seconds).
+    function buildSong() {
+      const ev = [];
+      const add = (beat, fn, ...a) => ev.push({ t: beat * M.spb, fn, a });
+      for (let bar = 0; bar < M.bars; bar++) {
+        const b0 = bar * M.bpb, ch = M.chords[bar % M.chords.length], name = M.sections[kit.secIndex(M.sections, bar)].name;
+        if (ch.pad && M.song.padOn !== false) add(b0, 'pad', ch.pad, M.bpb * M.spb);
+        M.song.arrange(add, bar, b0, ch, name);
+      }
+      if (M.song.extra) M.song.extra(add);
+      for (const n of M.chart) { const m = M.song.leadMidi(n); if (m != null) add(n.beat, 'lead', m, n.dur); }
+      ev.sort((a, b) => a.t - b.t);
+      return ev;
+    }
+
+    let song = [], idx = 0, start = 0, running = false;
+    function pump() {
+      if (!running) return;
+      const horizon = ac.currentTime + 0.3;
+      while (idx < song.length) {
+        const e = song[idx], at = start + e.t;
+        if (at > horizon) break;
+        if (at >= ac.currentTime - 0.02) {
+          const when = Math.max(at, ac.currentTime);
+          if (I[e.fn]) I[e.fn](when, ...e.a); else M.song.instruments[e.fn](A, when, ...e.a);
+        }
+        idx++;
+      }
+    }
+    setInterval(pump, 25);
+
+    let lastSong = -Infinity;
+    function songTime() {
+      let t;
+      if (ac.getOutputTimestamp) {
+        const ts = ac.getOutputTimestamp();
+        if (ts.contextTime > 0 && ts.performanceTime > 0) t = ts.contextTime + (performance.now() - ts.performanceTime) / 1000;
+      }
+      if (t === undefined) t = ac.currentTime - (ac.outputLatency || ac.baseLatency || 0);
+      t = t - start - settings.offset / 1000;
+      lastSong = Math.max(lastSong, t);
+      return lastSong;
+    }
+
+    return {
+      async start() {
+        if (!ac) init();
+        if (ac.state !== 'running') await ac.resume();
+        lastSong = -Infinity;
+        newRun(M.song);
+        song = buildSong(); idx = 0;
+        start = ac.currentTime + 2.2;
+        running = true;
+        if (M.onAudioStart) M.onAudioStart(A, start);
+        pump();
+      },
+      halt() {
+        running = false;
+        if (out) out.gain.setTargetAtTime(0, ac.currentTime, 0.05);
+        for (const m of SONGS) if (m.onAudioStop) m.onAudioStop();
+      },
+      songTime,
+      tick() {
+        if (!ac || !out) return;
+        const at = ac.currentTime;
+        osc('sine', 1760, at, 0.06).connect(decayGain(at, 0.04, 0.001, 0.04)).connect(out);
+      },
+    };
+  })();
+
+  // ===== HUD (score, combo, section, progress) =====
+  const fmtScore = (n) => String(n).padStart(7, '0');
+  const currentScore = () => Math.round((1e6 * S.weight) / M.totalJudges);
+  function drawHud(now) {
+    const beat = now / M.spb;
+    const top = Math.max(12, H * 0.02);
+    const paper = hex(M.theme.paper), muted = hex(M.theme.muted);
+    g.textBaseline = 'top';
+    g.textAlign = 'left'; g.fillStyle = rgba(paper, 0.95);
+    g.font = '22px "Dela Gothic One", sans-serif';
+    g.fillText(fmtScore(currentScore()), 18, top + 8);
+    if (S.combo >= 5) {
+      g.font = '18px "Dela Gothic One", sans-serif';
+      g.fillStyle = rgba(hex(M.theme.accent), 0.95);
+      g.fillText(String(S.combo), 18, top + 38);
+      const w = g.measureText(String(S.combo)).width;
+      g.font = '700 11px "Zen Kaku Gothic New", sans-serif';
+      g.fillStyle = rgba(paper, 0.7);
+      g.fillText('COMBO', 24 + w, top + 44);
+    }
+    const sec = M.sections[kit.secIndex(M.sections, Math.max(0, Math.floor(beat / M.bpb)))];
+    g.textAlign = 'right'; g.fillStyle = rgba(muted, 1);
+    g.font = '700 12px "Zen Kaku Gothic New", sans-serif';
+    g.fillText(`${M.title} ・ ${sec.name} ・ ${S.auto ? 'AUTO' : 'PLAY'}`, W - 18, top + 12);
+    const prog = Math.min(1, Math.max(0, now / (M.songEnd - 0.8)));
+    g.fillStyle = rgba(paper, 0.12); g.fillRect(0, 0, W, 3);
+    g.fillStyle = M.progressColor ? M.progressColor(beat) : rgba(hex(M.theme.accent), 0.9);
+    g.fillRect(0, 0, W * prog, 3);
+  }
+
+  // ===== Screens =====
+  const menuWrap = $('#menuWrap'), titleWrap = $('#titleWrap'), resultWrap = $('#resultWrap');
+  const rankOf = (sc) => (sc >= 980000 ? 'S+' : sc >= 950000 ? 'S' : sc >= 900000 ? 'A' : sc >= 800000 ? 'B' : 'C');
+  const fmtTime = (s) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
+
+  function applyTheme(m) {
+    const r = document.documentElement.style, t = m.theme;
+    r.setProperty('--ink', t.ink); r.setProperty('--ink-2', t.ink2); r.setProperty('--panel', t.panel);
+    r.setProperty('--paper', t.paper); r.setProperty('--muted', t.muted); r.setProperty('--accent', t.accent);
+    const p = hex(t.paper); r.setProperty('--line', `rgba(${p[0]},${p[1]},${p[2]},0.16)`);
+  }
+
+  // Put a song on screen in attract mode (it plays itself behind the panels).
+  function useSong(m) {
+    if (M !== m) { M = m; applyTheme(m); }
+    m.layout(W, H, true);
+    newRun(true, true);
+    S.attractT0 = performance.now() / 1000 - m.attractFromBar * m.bpb * m.spb;
+  }
+
+  function setHash(id) {
+    try { history.replaceState(null, '', id ? `#${id}` : location.pathname + location.search); } catch (e) { /* not allowed here */ }
+  }
+
+  function showMenu() {
+    audio.halt();
+    S.screen = 'menu';
+    menuWrap.hidden = false; titleWrap.hidden = true; resultWrap.hidden = true;
+    useSong(M || SONGS[0]);
+    renderMenu();
+    setHash('');
+    const btn = document.querySelector(`.song-card[data-id="${M.id}"]`);
+    if (btn) btn.focus({ preventScroll: true });
+  }
+
+  function showTitle(m) {
+    audio.halt();
+    S.screen = 'title';
+    useSong(m || M);
+    renderTitle();
+    menuWrap.hidden = true; titleWrap.hidden = false; resultWrap.hidden = true;
+    setHash(M.id);
+    $('#startBtn').focus({ preventScroll: true });
+  }
+
+  async function startGame() {
+    menuWrap.hidden = true; titleWrap.hidden = true; resultWrap.hidden = true;
+    S.screen = 'play';
+    M.layout(W, H, false);
+    newRun(settings.auto, false);
+    try { await audio.start(); } catch (e) { console.error(e); }
+  }
+
+  function showResult() {
+    audio.halt();
+    S.screen = 'result';
+    cv.classList.remove('aiming');
+    const sc = currentScore(), rank = rankOf(sc);
+    const fc = S.counts.miss === 0, ap = fc && S.counts.great === 0 && S.counts.good === 0;
+    $('#resSong').textContent = `RESULT ・ ${M.title}`;
+    $('#resRank').textContent = S.auto ? 'AUTO' : rank;
+    $('#resScore').textContent = fmtScore(sc);
+    $('#resPerfect').textContent = S.counts.perfect;
+    $('#resGreat').textContent = S.counts.great;
+    $('#resGood').textContent = S.counts.good;
+    $('#resMiss').textContent = S.counts.miss;
+    $('#resCombo').textContent = `${S.maxCombo} / ${M.totalJudges}`;
+    const badge = $('#resBadge');
+    badge.hidden = S.auto || !fc;
+    badge.textContent = ap ? 'ALL PERFECT' : 'FULL COMBO';
+    const prev = best[M.id];
+    let line = prev ? `自己ベスト ${fmtScore(prev.score)}（${prev.rank}）` : 'はじめてのプレイ';
+    if (!S.auto && (!prev || sc > prev.score)) {
+      best[M.id] = { score: sc, rank, fc: fc || !!(prev && prev.fc), ap: ap || !!(prev && prev.ap) };
+      save('minamo.best', best);
+      line = prev ? `<b>自己ベスト更新！</b> ${fmtScore(prev.score)} → ${fmtScore(sc)}` : '<b>はじめての記録</b>';
+    } else if (!S.auto && prev && (fc || ap)) {
+      best[M.id] = { ...prev, fc: prev.fc || fc, ap: prev.ap || ap };
+      save('minamo.best', best);
+    }
+    $('#resBest').innerHTML = S.auto ? 'オートプレイの記録は残りません' : line;
+    S.lastResult = { song: M.id, counts: { ...S.counts }, maxCombo: S.maxCombo, total: M.totalJudges, score: sc };
+    resultWrap.hidden = false;
+    M.layout(W, H, false);
+    // the finished run's numbers are on the panel now; let the demo play behind it
+    newRun(true, true);
+    S.attractT0 = performance.now() / 1000 - M.attractFromBar * M.bpb * M.spb;
+    $('#againBtn').focus({ preventScroll: true });
+  }
+
+  function colouredTitle(el, text, colors) {
+    el.textContent = '';
+    el.setAttribute('aria-label', text);
+    [...text].forEach((ch, i) => {
+      const s = document.createElement('span');
+      s.textContent = ch;
+      s.style.color = colors[i % colors.length];
+      el.appendChild(s);
+    });
+  }
+
+  function levelMeter(level) {
+    const lv = document.createElement('span'); lv.className = 'lv'; lv.setAttribute('aria-label', `レベル ${level}`);
+    for (let i = 1; i <= 10; i++) { const k = document.createElement('i'); if (i <= level) k.className = 'on'; lv.appendChild(k); }
+    return lv;
+  }
+  const bestLabel = (b) => (b ? `${b.ap ? 'AP ・ ' : b.fc ? 'FC ・ ' : ''}${b.rank} ${fmtScore(b.score)}` : '');
+
+  function renderMenu() {
+    const list = $('#songList');
+    list.textContent = '';
+    $('#gameSub').textContent = `水面のリズム ・ ${SONGS.length} 曲`;
+    for (const m of SONGS) {
+      const li = document.createElement('li');
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'song-card'; b.dataset.id = m.id;
+      b.style.setProperty('--sc', m.hues[0]);
+      const no = document.createElement('span'); no.className = 'sc-no'; no.textContent = String(m.no).padStart(2, '0');
+      const title = document.createElement('span'); title.className = 'sc-title'; title.textContent = m.title;
+      const jp = document.createElement('small'); jp.textContent = m.jp; title.appendChild(jp);
+      const genre = document.createElement('span'); genre.className = 'sc-genre'; genre.textContent = `${m.genre} ・ BPM ${m.bpm}`;
+      const side = document.createElement('span'); side.className = 'sc-side';
+      const bl = document.createElement('span'); bl.className = 'sc-best'; bl.textContent = bestLabel(best[m.id]);
+      side.append(levelMeter(m.level), bl);
+      b.append(no, title, side, genre);
+      b.addEventListener('click', () => showTitle(m));
+      // hovering or focusing a card previews that song's water behind the menu
+      const preview = () => { if (S.screen === 'menu' && M !== m) useSong(m); };
+      b.addEventListener('pointerenter', preview);
+      b.addEventListener('focus', preview);
+      li.appendChild(b);
+      list.appendChild(li);
+    }
+  }
+
+  function renderTitle() {
+    $('#songNo').textContent = `SONG ${String(M.no).padStart(2, '0')} ・ ${M.genre}`;
+    colouredTitle($('#songTitle'), M.title, M.hues);
+    $('#songSub').textContent = M.jp;
+    $('#songLede').innerHTML = M.lede;
+    const chips = $('#songChips');
+    chips.textContent = '';
+    const len = M.bars * M.bpb * M.spb;
+    for (const [k, v] of [['BPM', M.bpm], ['拍子', `${M.bpb}/4`], ['長さ', fmtTime(len)], ['ノーツ', M.chart.length], ['LEVEL', M.level]]) {
+      const li = document.createElement('li'); li.textContent = k;
+      const b = document.createElement('b'); b.textContent = v; li.appendChild(b);
+      chips.appendChild(li);
+    }
+    const b = best[M.id];
+    $('#songBest').innerHTML = b ? `自己ベスト <b>${fmtScore(b.score)}</b> ・ ${b.rank}${b.ap ? ' ・ ALL PERFECT' : b.fc ? ' ・ FULL COMBO' : ''}` : 'まだ記録がありません';
+  }
+
+  // ===== Input (aim: mouse + Z/X or click; touch taps the note) =====
+  const aimPointers = new Map();
+  const aimOf = (token) => aimPointers.get(token) || S.aim;
+  const playing = () => S.screen === 'play' && !S.auto;
+
+  window.addEventListener('keydown', (e) => {
+    if (S.screen === 'play') {
+      if (e.code === 'Escape') { showTitle(); return; }
+      if (S.auto) return;
+      if (e.code === 'KeyZ' || e.code === 'KeyX') { e.preventDefault(); if (!e.repeat) press(e.code, audio.songTime()); }
+    } else if (S.screen === 'title') {
+      if (e.code === 'Escape') { showMenu(); return; }
+      const t = e.target;
+      if ((e.code === 'Space' || e.code === 'Enter') && !(t instanceof HTMLButtonElement) && !(t instanceof HTMLInputElement)) { e.preventDefault(); startGame(); }
+    } else if (S.screen === 'result' && e.code === 'Escape') showTitle();
+  });
+  window.addEventListener('keyup', (e) => {
+    if (S.screen !== 'play' || S.auto) return;
+    if (e.code === 'KeyZ' || e.code === 'KeyX') release(e.code, audio.songTime());
+  });
+  window.addEventListener('pointermove', (e) => {
+    if (e.pointerType === 'mouse') { S.aim.x = e.clientX; S.aim.y = e.clientY; S.touch = false; }
+    else if (aimPointers.has(e.pointerId)) aimPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  });
+  cv.addEventListener('pointerdown', (e) => {
+    if (!playing()) return;
+    e.preventDefault();
+    const now = audio.songTime();
+    if (e.pointerType === 'mouse') { S.aim.x = e.clientX; S.aim.y = e.clientY; press('mouse', now); return; }
+    S.touch = true;
+    aimPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    press(e.pointerId, now);
+  });
+  const endPointer = (e) => {
+    if (S.screen !== 'play') { aimPointers.delete(e.pointerId); return; }
+    if (e.pointerType === 'mouse') release('mouse', audio.songTime());
+    else if (aimPointers.has(e.pointerId)) { release(e.pointerId, audio.songTime()); aimPointers.delete(e.pointerId); }
+  };
+  window.addEventListener('pointerup', endPointer);
+  window.addEventListener('pointercancel', endPointer);
+
+  // ----- Settings UI -----
+  const speed = $('#speed'), offset = $('#offset'), auto = $('#auto');
+  const syncUi = () => {
+    speed.value = settings.speed; $('#speedOut').textContent = Number(settings.speed).toFixed(1);
+    offset.value = settings.offset; $('#offsetOut').textContent = `${settings.offset > 0 ? '+' : ''}${settings.offset} ms`;
+    auto.checked = !!settings.auto;
+  };
+  const saveSettings = () => save('minamo.settings', settings);
+  speed.addEventListener('input', () => { settings.speed = +speed.value; syncUi(); saveSettings(); });
+  offset.addEventListener('input', () => { settings.offset = +offset.value; syncUi(); saveSettings(); });
+  auto.addEventListener('change', () => { settings.auto = auto.checked; saveSettings(); });
+  $('#startBtn').addEventListener('click', startGame);
+  $('#menuBtn').addEventListener('click', showMenu);
+  $('#againBtn').addEventListener('click', startGame);
+  $('#nextBtn').addEventListener('click', () => showTitle(SONGS[(SONGS.indexOf(M) + 1) % SONGS.length]));
+  $('#resMenuBtn').addEventListener('click', showMenu);
+
+  // ===== Main loop =====
+  let lastFrame = performance.now();
+  function frame(ts) {
+    // frame timestamps can arrive out of order under load; never step backwards
+    const dt = Math.max(0, Math.min(0.05, (ts - lastFrame) / 1000));
+    lastFrame = ts;
+    let now;
+    if (S.screen === 'play') {
+      now = audio.songTime();
+      if (!isFinite(now)) now = -2.2;
+    } else {
+      now = ts / 1000 - S.attractT0;
+      if (now > M.songEnd - 1) {
+        newRun(true, true);
+        S.attractT0 = ts / 1000 - M.attractFromBar * M.bpb * M.spb;
+        now = M.attractFromBar * M.bpb * M.spb;
+      }
+    }
+    M.update(now, dt);
+    updateJudge(now, dt);
+    M.draw(now, dt);
+    if (S.screen === 'play') drawHud(now);
+    if (S.screen === 'play' && now > M.songEnd) showResult();
+    requestAnimationFrame(frame);
+  }
+
+  function resize() {
+    DPR = Math.min(2, window.devicePixelRatio || 1);
+    W = window.innerWidth; H = window.innerHeight;
+    cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+    g.setTransform(DPR, 0, 0, DPR, 0, 0);
+    if (M) M.layout(W, H, true);
+  }

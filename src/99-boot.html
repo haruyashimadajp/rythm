@@ -1,0 +1,25 @@
+
+  // =====================================================================
+  //  BOOT
+  // =====================================================================
+  window.addEventListener('resize', resize);
+  syncUi();
+  resize();
+  renderMenu();
+  const fromHash = SONGS.find((m) => `#${m.id}` === location.hash);
+  M = fromHash || SONGS[0];
+  applyTheme(M);
+  if (fromHash) showTitle(fromHash); else showMenu();
+  // a link like …#koi opens that song's title, also when the page is already open
+  window.addEventListener('hashchange', () => {
+    const m = SONGS.find((x) => `#${x.id}` === location.hash);
+    if (m && S.screen !== 'play') showTitle(m);
+  });
+  requestAnimationFrame(frame);
+  if (document.fonts && document.fonts.load) document.fonts.load('20px "Dela Gothic One"').catch(() => {});
+  // test hook
+  window.__game = { S, SONGS, get song() { return M; }, showTitle, startGame, showMenu, now: () => (S.screen === 'play' ? audio.songTime() : null) };
+})();
+</script>
+</body>
+</html>
