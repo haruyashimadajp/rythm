@@ -101,6 +101,20 @@
   .stats dt { color: var(--muted); letter-spacing: 0.08em; }
   .stats dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
 
+  .pause-btn {
+    position: fixed; z-index: 5; top: max(10px, env(safe-area-inset-top, 0px)); right: max(10px, env(safe-area-inset-right, 0px));
+    width: 44px; height: 44px; border-radius: 50%; border: 1.5px solid var(--line); background: var(--panel); color: var(--paper);
+    font: 700 13px var(--font-body); letter-spacing: -1px; cursor: pointer; display: grid; place-items: center;
+  }
+  .pause-btn:hover { border-color: var(--paper); }
+  .panel-wrap.centered { align-items: center; justify-content: center; }
+  .panel-wrap.centered .panel { width: min(380px, 100%); }
+  .actions.stack { display: grid; gap: 10px; }
+  .actions.stack .btn { width: 100%; }
+  .pause-info { margin: 0; color: var(--muted); font-size: 0.86rem; }
+  .bar { height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--accent); }
+
   @media (min-width: 900px) {
     .panel-wrap { align-items: center; padding-left: max(48px, env(safe-area-inset-left, 0px)); }
     /* keep the whole song list on one screen */
@@ -127,6 +141,7 @@
     </div>
     <p class="lede">雫が落ちて広がる波紋が、水面に浮かぶノーツに<strong>届いた瞬間</strong>に叩く音楽ゲームです。曲を選んでください。</p>
     <ul class="songs" id="songList" aria-label="曲"></ul>
+    <div class="actions"><button class="btn" id="menuSettingsBtn" type="button">設定</button></div>
   </section>
 </div>
 
@@ -146,7 +161,34 @@
       <li><b>水切り</b><span>跳ねてくる石が着水する点を叩く</span></li>
       <li><b>交点</b><span>二つの波紋が交わる点。<kbd>Z</kbd> <kbd>X</kbd> を同時に（クリックとキーでも）、スマホは二本指で同時にタップ</span></li>
     </ul>
+    <label class="check"><input type="checkbox" id="auto"> オートプレイで見る</label>
+    <div class="actions">
+      <button class="btn primary" id="startBtn" type="button">演奏する</button>
+      <button class="btn" id="titleSettingsBtn" type="button">設定</button>
+      <button class="btn" id="menuBtn" type="button">← 曲選択へ</button>
+    </div>
+    <p class="hint">Space で開始 ・ プレイ中は Esc か右上のボタンで一時停止</p>
+    <p class="best" id="songBest"></p>
+  </section>
+</div>
+
+<div class="panel-wrap" id="settingsWrap" hidden>
+  <section class="panel" aria-labelledby="setTitle">
+    <div class="brand">
+      <p class="eyebrow">SETTINGS</p>
+      <h1 id="setTitle">設定</h1>
+    </div>
     <div class="settings">
+      <div class="row">
+        <label for="volume">音楽の音量</label>
+        <input type="range" id="volume" min="0" max="100" step="5" value="80">
+        <output id="volumeOut" for="volume">80%</output>
+      </div>
+      <div class="row">
+        <label for="se">タップ音の音量</label>
+        <input type="range" id="se" min="0" max="100" step="5" value="60">
+        <output id="seOut" for="se">60%</output>
+      </div>
       <div class="row">
         <label for="speed">ハイスピード</label>
         <input type="range" id="speed" min="0.6" max="2.4" step="0.1" value="1">
@@ -159,16 +201,35 @@
         <output id="offsetOut" for="offset">0 ms</output>
         <small>音が遅れて聞こえるときは ＋ 側へ</small>
       </div>
-      <label class="check"><input type="checkbox" id="auto"> オートプレイで見る</label>
+      <label class="check"><input type="checkbox" id="bg"> 背景の演出（鯉、花火、雪、オーロラなど）</label>
+      <label class="check"><input type="checkbox" id="fx"> 画面の揺れとフラッシュ</label>
     </div>
     <div class="actions">
-      <button class="btn primary" id="startBtn" type="button">演奏する</button>
-      <button class="btn" id="menuBtn" type="button">← 曲選択へ</button>
+      <button class="btn primary" id="setBack" type="button">戻る</button>
     </div>
-    <p class="hint">Space で開始 ・ プレイ中は Esc で中断</p>
-    <p class="best" id="songBest"></p>
+    <p class="hint">設定はこの端末に保存されます</p>
   </section>
 </div>
+
+<div class="panel-wrap centered" id="pauseWrap" hidden>
+  <section class="panel" aria-labelledby="pauseTitle">
+    <div class="brand">
+      <p class="eyebrow" id="pauseSong">PAUSE</p>
+      <h1 id="pauseTitle">一時停止</h1>
+    </div>
+    <div class="bar" aria-hidden="true"><i id="pauseBar"></i></div>
+    <p class="pause-info" id="pauseInfo"></p>
+    <div class="actions stack">
+      <button class="btn primary" id="resumeBtn" type="button">再開</button>
+      <button class="btn" id="restartBtn" type="button">やり直す</button>
+      <button class="btn" id="pauseSettingsBtn" type="button">設定</button>
+      <button class="btn" id="quitBtn" type="button">演奏中止</button>
+    </div>
+    <p class="hint">Esc でも再開できます</p>
+  </section>
+</div>
+
+<button class="pause-btn" id="pauseBtn" type="button" aria-label="一時停止" hidden>❚❚</button>
 
 <div class="panel-wrap" id="resultWrap" hidden>
   <section class="panel" aria-labelledby="resRank">
@@ -221,7 +282,7 @@
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   // ----- Settings and best scores (both stay on this device) -----
-  const settings = { speed: 1, offset: 0, auto: false };
+  const settings = { speed: 1, offset: 0, auto: false, volume: 0.8, se: 0.6, bg: true, fx: true };
   const load = (key, into) => { try { Object.assign(into, JSON.parse(localStorage.getItem(key) || '{}')); } catch (e) { /* storage unavailable */ } };
   const save = (key, v) => { try { localStorage.setItem(key, JSON.stringify(v)); } catch (e) { /* ignore */ } };
   load('minamo.settings', settings);
@@ -233,6 +294,7 @@
     screen: 'menu', notes: [], cursor: 0, auto: true, attract: true,
     combo: 0, maxCombo: 0, counts: { perfect: 0, great: 0, good: 0, miss: 0 }, weight: 0,
     attractT0: 0, aim: { x: 0, y: 0 }, touch: false,
+    paused: false, pausedAt: 0, countdown: 0,
   };
   const WIN = { perfect: 0.045, great: 0.09, good: 0.135 };
   const WEIGHT = { perfect: 1, great: 0.7, good: 0.4, miss: 0 };
@@ -245,6 +307,8 @@
     g, rgba, hex, mix, hash, mulberry32, TAU, DEG, S, settings, reduceMotion, WIN,
     get W() { return W; }, get H() { return H; },
     playing: () => S.screen === 'play',
+    decor: () => settings.bg !== false, // background scenery on (settings)
+    fx: () => settings.fx !== false && !reduceMotion, // screen shake and flashes on
     // wide screens keep the panel on the left outside of play, so songs shift their field right
     wide: () => W >= 900 && S.screen !== 'play',
     view: (base) => base / settings.speed,
@@ -372,7 +436,7 @@
       const comp = ac.createDynamicsCompressor();
       comp.threshold.value = -14; comp.ratio.value = 4; comp.attack.value = 0.004; comp.release.value = 0.2;
       comp.connect(ac.destination);
-      master = ac.createGain(); master.gain.value = 0.75; master.connect(comp);
+      master = ac.createGain(); master.gain.value = 0.94 * settings.volume; master.connect(comp);
       const len = ac.sampleRate;
       noise = ac.createBuffer(1, len, ac.sampleRate);
       const nd = noise.getChannelData(0);
@@ -543,7 +607,8 @@
       let t;
       if (ac.getOutputTimestamp) {
         const ts = ac.getOutputTimestamp();
-        if (ts.contextTime > 0 && ts.performanceTime > 0) t = ts.contextTime + (performance.now() - ts.performanceTime) / 1000;
+        // carry the last output timestamp forward to now, but never far: after a pause it can be stale
+        if (ts.contextTime > 0 && ts.performanceTime > 0) t = ts.contextTime + Math.min(0.1, Math.max(0, (performance.now() - ts.performanceTime) / 1000));
       }
       if (t === undefined) t = ac.currentTime - (ac.outputLatency || ac.baseLatency || 0);
       t = t - start - settings.offset / 1000;
@@ -580,10 +645,22 @@
       },
       songTime,
       tick() {
-        if (!ac || !out) return;
+        if (!ac || !out || settings.se <= 0) return;
         const at = ac.currentTime;
-        osc('sine', 1760, at, 0.06).connect(decayGain(at, 0.04, 0.001, 0.04)).connect(out);
+        osc('sine', 1760, at, 0.06).connect(decayGain(at, 0.0001 + 0.09 * settings.se, 0.001, 0.04)).connect(master);
       },
+      // the settings screen: volume takes effect at once; the tap sound plays as a sample
+      setVolume() { if (master) master.gain.setTargetAtTime(0.94 * settings.volume, ac.currentTime, 0.03); },
+      sampleTick() {
+        init();
+        if (ac.state !== 'running') ac.resume().catch(() => {});
+        if (settings.se <= 0) return;
+        const at = ac.currentTime + 0.02;
+        osc('sine', 1760, at, 0.06).connect(decayGain(at, 0.0001 + 0.09 * settings.se, 0.001, 0.04)).connect(master);
+      },
+      // a pause freezes the whole audio clock, so the song, its schedule and the song clock all stop together
+      pause() { if (ac && ac.state === 'running') ac.suspend().catch(() => {}); },
+      resume(at) { lastSong = at; if (ac) ac.resume().catch(() => {}); },
     };
   })();
 
@@ -610,7 +687,7 @@
     const sec = M.sections[kit.secIndex(M.sections, Math.max(0, Math.floor(beat / M.bpb)))];
     g.textAlign = 'right'; g.fillStyle = rgba(muted, 1);
     g.font = '700 12px "Zen Kaku Gothic New", sans-serif';
-    g.fillText(`${M.title} ・ ${sec.name} ・ ${S.auto ? 'AUTO' : 'PLAY'}`, W - 18, top + 12);
+    g.fillText(`${M.title} ・ ${sec.name} ・ ${S.auto ? 'AUTO' : 'PLAY'}`, W - 66, top + 12);
     const prog = Math.min(1, Math.max(0, now / (M.songEnd - 0.8)));
     g.fillStyle = rgba(paper, 0.12); g.fillRect(0, 0, W, 3);
     g.fillStyle = M.progressColor ? M.progressColor(beat) : rgba(hex(M.theme.accent), 0.9);
@@ -619,6 +696,10 @@
 
   // ===== Screens =====
   const menuWrap = $('#menuWrap'), titleWrap = $('#titleWrap'), resultWrap = $('#resultWrap');
+  const settingsWrap = $('#settingsWrap'), pauseWrap = $('#pauseWrap'), pauseBtn = $('#pauseBtn');
+  // panels that belong to one screen only; any screen change closes them
+  const closeOverlays = () => { settingsWrap.hidden = true; pauseWrap.hidden = true; pauseBtn.hidden = true; S.paused = false; S.countdown = 0; settingsBack = null; };
+  let settingsBack = null;
   const rankOf = (sc) => (sc >= 980000 ? 'S+' : sc >= 950000 ? 'S' : sc >= 900000 ? 'A' : sc >= 800000 ? 'B' : 'C');
   const fmtTime = (s) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
 
@@ -643,6 +724,7 @@
 
   function showMenu() {
     audio.halt();
+    closeOverlays();
     S.screen = 'menu';
     menuWrap.hidden = false; titleWrap.hidden = true; resultWrap.hidden = true;
     useSong(M || SONGS[0]);
@@ -654,6 +736,7 @@
 
   function showTitle(m) {
     audio.halt();
+    closeOverlays();
     S.screen = 'title';
     useSong(m || M);
     renderTitle();
@@ -675,6 +758,8 @@
       btn.textContent = label; btn.disabled = false;
     }
     menuWrap.hidden = true; titleWrap.hidden = true; resultWrap.hidden = true;
+    closeOverlays();
+    pauseBtn.hidden = false;
     S.screen = 'play';
     M.layout(W, H, false);
     newRun(settings.auto, false);
@@ -683,6 +768,7 @@
 
   function showResult() {
     audio.halt();
+    closeOverlays();
     S.screen = 'result';
     cv.classList.remove('aiming');
     const sc = currentScore(), rank = rankOf(sc);
@@ -780,15 +866,64 @@
     $('#songBest').innerHTML = b ? `自己ベスト <b>${fmtScore(b.score)}</b> ・ ${b.rank}${b.ap ? ' ・ ALL PERFECT' : b.fc ? ' ・ FULL COMBO' : ''}` : 'まだ記録がありません';
   }
 
+  // ===== Pause =====
+  const fmtClock = (s) => `${Math.floor(Math.max(0, s) / 60)}:${String(Math.floor(Math.max(0, s) % 60)).padStart(2, '0')}`;
+  function pauseGame() {
+    if (S.screen !== 'play' || S.paused) return;
+    S.paused = true; S.countdown = 0; S.pausedAt = audio.songTime();
+    audio.pause();
+    // the hand leaves the notes, so a hold in progress finishes on its own
+    for (let i = S.cursor; i < S.notes.length; i++) { const n = S.notes[i]; if (n.holding !== null) n.holding = 'auto'; }
+    aimPointers.clear();
+    cv.classList.remove('aiming');
+    const len = M.songEnd - 0.8;
+    $('#pauseSong').textContent = `PAUSE ・ ${M.title}`;
+    $('#pauseBar').style.width = `${Math.max(0, Math.min(100, (S.pausedAt / len) * 100))}%`;
+    $('#pauseInfo').textContent = `${fmtClock(S.pausedAt)} / ${fmtClock(len)} ・ ${String(currentScore()).padStart(7, '0')} ・ ${S.combo} COMBO`;
+    pauseWrap.hidden = false; pauseBtn.hidden = true;
+    $('#resumeBtn').focus({ preventScroll: true });
+  }
+  // resuming counts in 3, 2, 1 with the music still stopped, then starts it from the same moment
+  function resumeGame() {
+    if (!S.paused || S.countdown) return;
+    pauseWrap.hidden = true; settingsWrap.hidden = true;
+    S.countdown = performance.now() / 1000 + 1.5;
+  }
+  function restartGame() { audio.halt(); startGame(); }
+  function drawCountdown(nowSec) {
+    const left = S.countdown - nowSec, n = Math.max(1, Math.ceil(left / 0.5)), u = 1 - ((left / 0.5) % 1 || 1);
+    g.fillStyle = 'rgba(0,0,0,0.25)'; g.fillRect(0, 0, W, H);
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.globalAlpha = 1 - u * 0.6;
+    g.fillStyle = rgba(hex(M.theme.paper), 1);
+    g.font = `${Math.round(Math.min(120, W * 0.2) * (1 + u * 0.25))}px "Dela Gothic One", sans-serif`;
+    g.fillText(String(n), W / 2, H / 2);
+    g.globalAlpha = 1;
+  }
+
+  // ===== Settings screen =====
+  function openSettings(from) {
+    settingsBack = from;
+    from.hidden = true; settingsWrap.hidden = false;
+    syncUi();
+    $('#setBack').focus({ preventScroll: true });
+  }
+  function closeSettings() {
+    settingsWrap.hidden = true;
+    if (settingsBack) { settingsBack.hidden = false; const b = settingsBack.querySelector('.btn.primary, .song-card'); if (b) b.focus({ preventScroll: true }); }
+    settingsBack = null;
+  }
+
   // ===== Input (aim: mouse + Z/X or click; touch taps the note) =====
   const aimPointers = new Map();
   const aimOf = (token) => aimPointers.get(token) || S.aim;
-  const playing = () => S.screen === 'play' && !S.auto;
+  const playing = () => S.screen === 'play' && !S.auto && !S.paused;
 
   window.addEventListener('keydown', (e) => {
+    if (!settingsWrap.hidden) { if (e.code === 'Escape') closeSettings(); return; }
     if (S.screen === 'play') {
-      if (e.code === 'Escape') { showTitle(); return; }
-      if (S.auto) return;
+      if (e.code === 'Escape' || e.code === 'KeyP') { e.preventDefault(); if (S.paused) resumeGame(); else pauseGame(); return; }
+      if (S.auto || S.paused) return;
       if (e.code === 'KeyZ' || e.code === 'KeyX') { e.preventDefault(); if (!e.repeat) press(e.code, audio.songTime()); }
     } else if (S.screen === 'title') {
       if (e.code === 'Escape') { showMenu(); return; }
@@ -797,7 +932,7 @@
     } else if (S.screen === 'result' && e.code === 'Escape') showTitle();
   });
   window.addEventListener('keyup', (e) => {
-    if (S.screen !== 'play' || S.auto) return;
+    if (S.screen !== 'play' || S.auto || S.paused) return;
     if (e.code === 'KeyZ' || e.code === 'KeyX') release(e.code, audio.songTime());
   });
   window.addEventListener('pointermove', (e) => {
@@ -814,7 +949,7 @@
     press(e.pointerId, now);
   });
   const endPointer = (e) => {
-    if (S.screen !== 'play') { aimPointers.delete(e.pointerId); return; }
+    if (S.screen !== 'play' || S.paused) { aimPointers.delete(e.pointerId); return; }
     if (e.pointerType === 'mouse') release('mouse', audio.songTime());
     else if (aimPointers.has(e.pointerId)) { release(e.pointerId, audio.songTime()); aimPointers.delete(e.pointerId); }
   };
@@ -822,16 +957,33 @@
   window.addEventListener('pointercancel', endPointer);
 
   // ----- Settings UI -----
-  const speed = $('#speed'), offset = $('#offset'), auto = $('#auto');
+  const speed = $('#speed'), offset = $('#offset'), auto = $('#auto'), volume = $('#volume'), se = $('#se'), bg = $('#bg'), fx = $('#fx');
   const syncUi = () => {
+    volume.value = Math.round(settings.volume * 100); $('#volumeOut').textContent = `${Math.round(settings.volume * 100)}%`;
+    se.value = Math.round(settings.se * 100); $('#seOut').textContent = `${Math.round(settings.se * 100)}%`;
     speed.value = settings.speed; $('#speedOut').textContent = Number(settings.speed).toFixed(1);
     offset.value = settings.offset; $('#offsetOut').textContent = `${settings.offset > 0 ? '+' : ''}${settings.offset} ms`;
-    auto.checked = !!settings.auto;
+    auto.checked = !!settings.auto; bg.checked = settings.bg !== false; fx.checked = settings.fx !== false;
   };
   const saveSettings = () => save('minamo.settings', settings);
+  volume.addEventListener('input', () => { settings.volume = +volume.value / 100; syncUi(); saveSettings(); audio.setVolume(); });
+  se.addEventListener('input', () => { settings.se = +se.value / 100; syncUi(); saveSettings(); });
+  se.addEventListener('change', () => audio.sampleTick());
   speed.addEventListener('input', () => { settings.speed = +speed.value; syncUi(); saveSettings(); });
   offset.addEventListener('input', () => { settings.offset = +offset.value; syncUi(); saveSettings(); });
   auto.addEventListener('change', () => { settings.auto = auto.checked; saveSettings(); });
+  bg.addEventListener('change', () => { settings.bg = bg.checked; saveSettings(); });
+  fx.addEventListener('change', () => { settings.fx = fx.checked; saveSettings(); });
+  $('#menuSettingsBtn').addEventListener('click', () => openSettings(menuWrap));
+  $('#titleSettingsBtn').addEventListener('click', () => openSettings(titleWrap));
+  $('#pauseSettingsBtn').addEventListener('click', () => openSettings(pauseWrap));
+  $('#setBack').addEventListener('click', closeSettings);
+  pauseBtn.addEventListener('click', pauseGame);
+  $('#resumeBtn').addEventListener('click', resumeGame);
+  $('#restartBtn').addEventListener('click', restartGame);
+  $('#quitBtn').addEventListener('click', () => showTitle());
+  // leaving the page (another tab, the home screen) pauses the song
+  document.addEventListener('visibilitychange', () => { if (document.hidden) pauseGame(); });
   $('#startBtn').addEventListener('click', startGame);
   $('#menuBtn').addEventListener('click', showMenu);
   $('#againBtn').addEventListener('click', startGame);
@@ -845,6 +997,22 @@
     const dt = Math.max(0, Math.min(0.05, (ts - lastFrame) / 1000));
     lastFrame = ts;
     let now;
+    if (S.screen === 'play' && S.paused) {
+      // paused: the picture holds still; after the count-in the music and the clock carry on together
+      now = S.pausedAt;
+      M.update(now, 0); M.draw(now, 0); drawHud(now);
+      if (S.countdown) {
+        const nowSec = performance.now() / 1000;
+        if (nowSec >= S.countdown) {
+          S.paused = false; S.countdown = 0;
+          audio.resume(S.pausedAt);
+          pauseBtn.hidden = false;
+          cv.classList.toggle('aiming', !S.auto);
+        } else drawCountdown(nowSec);
+      }
+      requestAnimationFrame(frame);
+      return;
+    }
     if (S.screen === 'play') {
       now = audio.songTime();
       if (!isFinite(now)) now = -2.2;
@@ -1148,8 +1316,8 @@
         F, toScreen, noteR, HUES, INK, INK2, PAPER, MUTED, ACCENT, SPB, BPB, SECTIONS, DROPS, CHART, shape, burst, ringC, ringR, onScreen,
         rings: [], // the rings on the water this frame: { x, y, R, hue, d } in field units
         get W() { return W; }, get H() { return H; },
-        shake(v) { if (!kit.reduceMotion) shakeV = Math.max(shakeV, v); },
-        flash(v, col = PAPER) { flashV = Math.max(flashV, kit.reduceMotion ? v * 0.3 : v); flashCol = col; },
+        shake(v) { if (kit.fx()) shakeV = Math.max(shakeV, v); },
+        flash(v, col = PAPER) { if (!kit.fx()) return; flashV = Math.max(flashV, v); flashCol = col; },
         // a ring path in field units (follows the song's ripple shape)
         ringPath(x, y, R) {
           g.beginPath();
@@ -1571,19 +1739,21 @@
           lastNow = now;
           g.save();
           if (shakeV > 0) g.translate((Math.random() - 0.5) * shakeV, (Math.random() - 0.5) * shakeV);
+          // with the background scenery switched off, only the water, its rings and the notes are drawn
+          const decor = kit.decor();
           drawBase(beat, ctx.pulse);
-          if (scene.back) scene.back(ctx);
+          if (decor && scene.back) scene.back(ctx);
           drawRipples(now);
-          if (scene.surface) scene.surface(ctx);
+          if (decor && scene.surface) scene.surface(ctx);
           drawStones(now);
           drawNotes(now);
           drawEffects(dt);
-          if (scene.front) scene.front(ctx);
+          if (decor && scene.front) scene.front(ctx);
           drawAim(now, dt);
           drawBanners(now, beat);
           if (kit.playing()) drawPopups(now);
           g.restore();
-          if (scene.post) scene.post(ctx);
+          if (decor && scene.post) scene.post(ctx);
           if (flashV > 0) { g.fillStyle = rgba(flashCol, Math.min(0.6, flashV)); g.fillRect(0, 0, W, H); }
         },
         onJudge(n, grade, now) {

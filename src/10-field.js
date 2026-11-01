@@ -275,8 +275,8 @@
         F, toScreen, noteR, HUES, INK, INK2, PAPER, MUTED, ACCENT, SPB, BPB, SECTIONS, DROPS, CHART, shape, burst, ringC, ringR, onScreen,
         rings: [], // the rings on the water this frame: { x, y, R, hue, d } in field units
         get W() { return W; }, get H() { return H; },
-        shake(v) { if (!kit.reduceMotion) shakeV = Math.max(shakeV, v); },
-        flash(v, col = PAPER) { flashV = Math.max(flashV, kit.reduceMotion ? v * 0.3 : v); flashCol = col; },
+        shake(v) { if (kit.fx()) shakeV = Math.max(shakeV, v); },
+        flash(v, col = PAPER) { if (!kit.fx()) return; flashV = Math.max(flashV, v); flashCol = col; },
         // a ring path in field units (follows the song's ripple shape)
         ringPath(x, y, R) {
           g.beginPath();
@@ -698,19 +698,21 @@
           lastNow = now;
           g.save();
           if (shakeV > 0) g.translate((Math.random() - 0.5) * shakeV, (Math.random() - 0.5) * shakeV);
+          // with the background scenery switched off, only the water, its rings and the notes are drawn
+          const decor = kit.decor();
           drawBase(beat, ctx.pulse);
-          if (scene.back) scene.back(ctx);
+          if (decor && scene.back) scene.back(ctx);
           drawRipples(now);
-          if (scene.surface) scene.surface(ctx);
+          if (decor && scene.surface) scene.surface(ctx);
           drawStones(now);
           drawNotes(now);
           drawEffects(dt);
-          if (scene.front) scene.front(ctx);
+          if (decor && scene.front) scene.front(ctx);
           drawAim(now, dt);
           drawBanners(now, beat);
           if (kit.playing()) drawPopups(now);
           g.restore();
-          if (scene.post) scene.post(ctx);
+          if (decor && scene.post) scene.post(ctx);
           if (flashV > 0) { g.fillStyle = rgba(flashCol, Math.min(0.6, flashV)); g.fillRect(0, 0, W, H); }
         },
         onJudge(n, grade, now) {
