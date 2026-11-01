@@ -1229,8 +1229,24 @@
         gl.addColorStop(0, rgba(col, 0.45 * a)); gl.addColorStop(1, rgba(col, 0));
         g.fillStyle = gl; g.fillRect(sx - r, sy - r, r * 2, r * 2);
       }
+      // The rings that still have notes to strike are the lines to watch: they are drawn bold and bright,
+      // and every other line (echoes, rings already done, sonar sweeps, stone splashes) stays faint.
+      const live = new Map();
+      function findLive(now) {
+        live.clear();
+        const mark = (d, k) => { if (!live.has(d)) live.set(d, new Set()); live.get(d).add(k); };
+        for (let i = S.cursor; i < S.notes.length; i++) {
+          const n = S.notes[i];
+          if (n.t - now > VIEW + 2) break;
+          if (n.head && n.holding === null) continue;
+          if (n.skip) continue; // a stone's note sits on its landing spot, not on a ring
+          mark(n.drop, n.ring || 0);
+          if (n.cross) mark(n.cross, 0);
+        }
+      }
       function drawRipples(now) {
         field.rings.length = 0;
+        findLive(now);
         const view = Math.hypot(W, H) / F.u;
         for (const d of DROPS) {
           const lead = d.t - now;
@@ -1273,19 +1289,26 @@
             if (R <= 0 || R > reach) continue;
             any = true;
             const appear = d.speed < 0 || d.r0 > 0 ? Math.min(1, ok / 0.4) : 1;
-            for (let e = 0; e < 3; e++) {
-              // echoes: where the ring (and a moving centre) was a moment ago
+            const judging = live.has(d) && live.get(d).has(k);
+            for (let e = 2; e >= 1; e--) {
+              // echoes: where the ring (and a moving centre) was a moment ago; always faint
               const oe = ok - e * 0.3;
               if (oe < 0) continue;
               const Re = ringR(d, oe);
               if (Re <= 0) continue;
               const [ex, ey] = ringC(d, off - e * 0.3);
-              drawRing(d, ex, ey, Re, (e === 0 ? 0.75 : 0.22 / e) * fade * appear * (d.small ? 0.7 : 1), e === 0 ? (inside ? 2.5 : 4) : 1.5);
+              drawRing(d, ex, ey, Re, (0.12 / e) * fade * appear, 1);
             }
-            if (!inside) {
+            if (!inside && judging) {
               // a giant ring from off screen trails a soft wake
-              for (let e = 1; e <= 5; e++) { g.strokeStyle = rgba(col, 0.06 * fade * appear); g.lineWidth = 7; field.ringPath(cx, cy, R - e * 0.025 * Math.sign(d.speed || 1)); g.stroke(); }
+              for (let e = 1; e <= 4; e++) { g.strokeStyle = rgba(col, 0.04 * fade * appear); g.lineWidth = 6; field.ringPath(cx, cy, R - e * 0.025 * Math.sign(d.speed || 1)); g.stroke(); }
             }
+            if (judging) {
+              // the line to watch: a soft glow under a bold, bright ring
+              g.strokeStyle = rgba(col, 0.18 * appear); g.lineWidth = 9;
+              field.ringPath(cx, cy, R); g.stroke();
+              drawRing(d, cx, cy, R, 0.95 * appear, 3.5);
+            } else drawRing(d, cx, cy, R, 0.26 * fade * appear * (d.small ? 0.7 : 1), 1.3);
             field.rings.push({ x: cx, y: cy, R, hue: d.hue, d });
           }
           if (!inside || !any) continue;
@@ -1589,7 +1612,7 @@
   // ---------------------------------------------------------------------
   rippleSong({
     id: 'shizuku', title: 'SHIZUKU', jp: '雫', genre: 'Lo-fi Hip Hop', level: 2,
-    lede: '雨の夜の水たまり。ローファイ・ヒップホップのゆったりしたビートに合わせて、波紋の基本と、跳ねてくる石を叩く<strong>水切り</strong>を覚える一曲です。',
+    lede: '雨の夜の水たまり。ローファイ・ヒップホップのゆったりしたビートで、波紋の基本と<strong>水切り</strong>を覚える一曲。軒先からは<strong>雫が同じ所に落ち続け</strong>、二つの雨粒の波紋が<strong>交わる点</strong>では同時押し、窓を伝う雫は波紋ごと流れていきます。',
     theme: { ink: '#060d16', ink2: '#0f2233', panel: 'rgba(6, 13, 22, 0.84)', paper: '#e9f1f5', muted: '#8ea4b3', accent: '#ffc27a' },
     hues: ['#7fd8e6', '#a7a4ff', '#ffc27a', '#ff9fb8'],
     bpm: 84, bars: 32, speed: 0.1, attractFromBar: 12,
@@ -1605,18 +1628,19 @@
       { pad: [55, 59, 62, 64], bass: 36, lead: [67, 71, 74, 76], ep: [52, 55, 59, 62] },
     ],
     kickOn: (bar, name) => name !== 'INTRO' && name !== 'BREAK',
-    chart({ drop, skip, B }) {
+    chart({ drop, skip, pulse, cross, B }) {
       // INTRO: one drop at a time, half notes, then quarters
       drop(B(0), [0, 0], 0, '..o...o...o.', { a: -90, turn: 90 });
       drop(B(1, 2), [-0.35, 0.1], 1, '..o...o.o.', { a: 0, turn: -70 });
       drop(B(3), [0.3, -0.1], 2, '..o.o.o.', { a: 180, turn: 60 });
       // VERSE: drops alternate sides with a short answer between; a first eighth pair, a first hold
       drop(B(4), [0.35, -0.12], 2, '..o.o.o.oo', { a: 180, turn: 55 });
-      drop(B(5, 2), [-0.05, 0.25], 0, '..o.o.', { a: -90, turn: 60 });
+      // drips from the eaves: the same spot, twice
+      pulse(B(5, 2), [-0.05, 0.25], 0, { a: -90, off: 1, n: 2, gap: 1 });
       drop(B(6), [-0.35, 0.12], 3, '..o.o.o.oo', { a: 0, turn: -55 });
-      drop(B(7, 2), [0.05, -0.25], 1, '..o.o.', { a: 90, turn: -60 });
+      pulse(B(7, 2), [0.05, -0.25], 1, { a: 90, off: 1, n: 2, gap: 1 });
       drop(B(8), [0.3, 0.15], 0, '..o.o.H---', { a: 200, turn: 60 });
-      drop(B(9, 2), [-0.35, -0.1], 2, '..o.o.', { a: 0, turn: 50 });
+      pulse(B(9, 2), [-0.35, -0.1], 2, { a: 0, off: 1, n: 3, gap: 0.5 });
       drop(B(10), [0.25, -0.2], 3, '..o.o.oo', { a: 180, turn: 50 });
       skip(B(11, 1), [-0.55, 0.3], [0.1, 0.1], 2, 'o.o.o.');
       // CHORUS: a new drop every bar from a new place; a skipping stone closes each half
@@ -1628,11 +1652,13 @@
       skip(B(19, 1), [-0.6, -0.3], [0.2, 0.2], 1, 'o.o.oo');
       // BREAK: slow rings from the centre; ride them outward, and round
       drop(B(20), [0, 0], 3, '..H---..S---', { a: -90, turn: 135, speed: 0.08, spin: 90 });
-      drop(B(22), [0.1, 0.05], 1, '..o.o.o.H---', { a: 30, turn: 100, speed: 0.08 });
-      // CHORUS II: one side calls, the other answers as soon as it lands
-      [[24, -0.4, -0.15, 0.4, 0.15], [26, 0.4, -0.15, -0.4, 0.15]].forEach(([b, x1, y1, x2, y2], k) => {
-        drop(B(b), [x1, y1], (k * 2) % 4, '..o.o.o.', { a: -60, turn: 30 });
-        drop(B(b, 3), [x2, y2], (k * 2 + 1) % 4, '..o.o.oo', { a: 120, turn: 30 });
+      // a raindrop running down the glass, its ring sliding with it
+      drop(B(22), [0.15, -0.25], 1, '..o.o.o.H---', { a: 30, turn: 100, speed: 0.08, path: [[7, 0.15, 0.22]], ease: 'linear' });
+      // CHORUS II: two raindrops fall together; one sings, then the other, and where their rings meet, both keys at once
+      [[24, -0.12], [25, 0.12], [26, -0.05], [27, 0.1]].forEach(([b, y], k) => {
+        const A = drop(B(b), [-0.35, y], (k * 2) % 4, '..o.oo', { a: 0, turn: y < 0 ? 40 : -40 });
+        const Bd = drop(B(b), [0.35, y], (k * 2 + 1) % 4, '......o', { a: 180, turn: 0 });
+        cross(B(b, 4), A, Bd);
       });
       drop(B(28), [0, -0.1], 2, '..o.oo..', { a: 90, turn: 50 });
       skip(B(29, 1), [-0.6, 0.3], [0.5, -0.2], 0, 'o.o.oo');
@@ -1743,8 +1769,21 @@
           }
           g.globalCompositeOperation = 'source-over';
         },
-        // raindrops landing everywhere: small rings that fade
+        // raindrops landing everywhere: small rings that fade; drips from the eaves fall onto their spot
         surface(c) {
+          for (const d of f.DROPS) {
+            if (d.rings < 2) continue;
+            if (d.beat > c.beat + 2) break;
+            for (let k = 0; k < d.rings; k++) {
+              const u = (d.beat + k * d.gap - c.beat) / 0.6;
+              if (u < 0 || u > 1) continue;
+              const [x, y] = f.toScreen(d.x, d.y), h = u * f.F.u * 0.35;
+              g.fillStyle = rgba(RAINC, 0.8 * (1 - u * 0.5));
+              g.beginPath(); g.ellipse(x, y - h, 2.5, 4.5, 0, 0, TAU); g.fill();
+              g.strokeStyle = rgba(RAINC, 0.25); g.lineWidth = 1;
+              g.beginPath(); g.moveTo(x, y - h - 4); g.lineTo(x, y - h - 18); g.stroke();
+            }
+          }
           if (kit.reduceMotion) return;
           const rate = RATE[c.sec.name] || 6;
           const k1 = Math.floor(c.now * rate), k0 = Math.floor((c.now - 1.2) * rate);
@@ -1780,9 +1819,10 @@
   //  Scene: koi gliding under the surface, lily pads with lotus flowers
   //  that bounce on the kick, caustic light and sun glints.
   // ---------------------------------------------------------------------
+  const KOI_SWIM = []; // drops carried by a swimming koi (the scene draws the fish at the ring's centre)
   rippleSong({
     id: 'koi', title: 'KOI', jp: '鯉', genre: 'Disco House', level: 4,
-    lede: '陽の差す池。鯉がゆったり泳ぐ下で、四つ打ちのハウスが鳴り続けます。裏拍のベースとピアノに乗って、<strong>8分の連打</strong>と<strong>回る長押し</strong>が始まります。',
+    lede: '陽の差す池で四つ打ちのハウス。サビでは<strong>泳ぐ鯉が波紋を連れて</strong>水面を横切り、鯉の口が水面を<strong>パクパクと同じ所で叩き</strong>、二匹の鯉の波紋が<strong>交わる点</strong>で同時押し。回る長押しも始まります。',
     theme: { ink: '#03140f', ink2: '#0b3a2c', panel: 'rgba(3, 20, 15, 0.84)', paper: '#f2f7ee', muted: '#94b8a6', accent: '#ffd25e' },
     hues: ['#ff8a3d', '#ffd25e', '#4fe0b0', '#ff7eb6'],
     bpm: 124, bars: 40, speed: 0.12, attractFromBar: 16,
@@ -1799,7 +1839,7 @@
       { pad: [59, 62, 66, 67], bass: 40, lead: [67, 71, 74, 76] },
     ],
     kickOn: (bar, name) => name !== 'INTRO' && name !== 'BREAK',
-    chart({ drop, skip, B }) {
+    chart({ drop, skip, pulse, cross, B }) {
       // INTRO
       drop(B(0), [0, 0], 2, '..o.o.o.o.', { a: -90, turn: 80 });
       drop(B(1, 2), [-0.35, 0.05], 0, '..o.o.o.', { a: 0, turn: -60 });
@@ -1807,11 +1847,12 @@
       drop(B(3, 2), [-0.1, 0.25], 3, '..o.o.', { a: -90, turn: 50 });
       // GROOVE: eighth pairs, short answers from the middle, a hold, a skipping stone
       drop(B(4), [0.4, -0.15], 0, '..o.o.oo.o', { a: 180, turn: -45 });
-      drop(B(5, 2), [-0.1, 0.2], 3, '..o.oo', { a: -90, turn: 45 });
+      // a koi's mouth breaks the surface: one spot, three times
+      pulse(B(5, 2), [-0.1, 0.2], 3, { a: -90, off: 1, n: 3, gap: 0.5 });
       drop(B(6), [-0.4, 0.15], 1, '..o.o.oo.o', { a: 0, turn: -45 });
-      drop(B(7, 2), [0.1, -0.2], 2, '..o.oo', { a: 90, turn: 45 });
+      pulse(B(7, 2), [0.1, -0.2], 2, { a: 90, off: 1, n: 3, gap: 0.5 });
       drop(B(8), [0.35, 0.18], 2, '..o.ooH---', { a: 200, turn: 50 });
-      drop(B(9, 2), [-0.3, -0.15], 0, '..o.oo', { a: 0, turn: 40 });
+      pulse(B(9, 2), [-0.3, -0.15], 0, { a: 0, off: 1, n: 3, gap: 0.5 });
       skip(B(10, 1), [-0.65, 0.3], [0.1, 0], 3, 'o.o.o.oo');
       drop(B(11), [0.4, 0], 0, '..o.o.o.', { a: 180, turn: -50 });
       // BUILD: two drops land together and take turns, left, right, left, right; then a run
@@ -1820,19 +1861,21 @@
         drop(B(b), [x2, y2], 3, '....o...o.', { a: 180, turn: -40 });
       });
       drop(B(15), [0, 0], 1, '..o.oooo', { a: -90, turn: 40 });
-      // CHORUS: a drop every bar from somewhere new; every fourth ends in a hold that circles round
+      // CHORUS: each bar a koi swims across, its ring trailing from it; every fourth ends in a hold that circles round
       const SRC = [[-0.45, -0.18], [0.45, 0.18], [0.45, -0.18], [-0.45, 0.18], [0, -0.22], [0, 0.22], [-0.5, 0], [0.5, 0]];
       SRC.forEach((p, k) => {
         const pat = k % 4 === 3 ? '..o.S---' : k % 2 ? '..o.oo.o' : '..o.o.oo';
-        drop(B(16 + k), p, k % 4, pat, { a: k % 2 ? 200 : -20, turn: 40, spin: k === 3 ? 140 : -140 });
+        const q = [p[0] * 0.3 + (k % 2 ? -0.15 : 0.15), p[1] * -0.4];
+        KOI_SWIM.push(drop(B(16 + k), p, k % 4, pat, { a: k % 2 ? 200 : -20, turn: 40, spin: k === 3 ? 140 : -140, path: [[4, q[0], q[1]]] }));
       });
       // BREAK: a slow ring to ride, then a long skip across the pond
       drop(B(24), [0, 0], 2, '..H---..S---', { a: -90, turn: 135, speed: 0.09, spin: -120 });
       skip(B(26, 1), [0.62, 0.3], [-0.3, -0.12], 0, 'o.o.o.o.o.oo');
-      // CHORUS II: one side calls, the other answers
-      [[28, -0.4, -0.15, 0.4, 0.15], [30, 0.4, -0.15, -0.4, 0.15], [32, 0, -0.25, 0, 0.25]].forEach(([b, x1, y1, x2, y2], k) => {
-        drop(B(b), [x1, y1], (k * 2) % 4, '..o.o.oo', { a: -60, turn: 30 });
-        drop(B(b + 1), [x2, y2], (k * 2 + 1) % 4, '..o.o.oo', { a: 120, turn: 30 });
+      // CHORUS II: two koi surface together; one, then the other, and where their rings meet, both keys at once
+      [-0.1, 0.1, -0.05, 0.12, -0.12, 0.06].forEach((y, k) => {
+        const A = drop(B(28 + k), [-0.3, y], (k * 2) % 4, '..oo', { a: 0, turn: y < 0 ? 40 : -40 });
+        const Bd = drop(B(28 + k), [0.3, y], (k * 2 + 1) % 4, '....oo', { a: 180, turn: y < 0 ? -40 : 40 });
+        cross(B(28 + k, 3.5), A, Bd);
       });
       drop(B(34), [-0.3, 0], 1, '..o.oo.oo.', { a: 0, turn: 50 });
       drop(B(35), [0.3, 0], 3, '..o.H---', { a: 180, turn: 50 });
@@ -1968,8 +2011,23 @@
           g.fillStyle = ray; g.fillRect(0, 0, f.W, f.H);
           for (const fi of FISH) drawFish(fi, c.now);
         },
-        // lily pads, and lotus flowers that bounce on the kick
+        // lily pads, and lotus flowers that bounce on the kick; the koi that carry rings
         surface(c) {
+          for (const d of KOI_SWIM) {
+            const off = (c.now - d.t) / f.SPB;
+            if (off < -0.5 || c.now > d.last + 0.5) continue;
+            const a = Math.min(1, (off + 0.5) * 2) * Math.min(1, (d.last + 0.5 - c.now) * 2);
+            const [x, y] = f.ringC(d, off), [x2, y2] = f.ringC(d, off + 0.3);
+            const [sx, sy] = f.toScreen(x, y), [tx, ty] = f.toScreen(x2, y2);
+            const ang = Math.hypot(tx - sx, ty - sy) > 0.5 ? Math.atan2(ty - sy, tx - sx) : 0, s = f.F.u * 0.032, wag = Math.sin(c.now * 7) * 0.35;
+            g.save(); g.translate(sx, sy); g.rotate(ang); g.globalAlpha = 0.9 * a;
+            g.fillStyle = rgba(KOI[d.hue % 4], 1);
+            g.beginPath(); g.moveTo(-s * 2.2, 0); g.lineTo(-s * 3.2, -s * 0.9 + wag * s); g.lineTo(-s * 3.2, s * 0.9 + wag * s); g.closePath(); g.fill();
+            g.beginPath(); g.ellipse(0, 0, s * 2.3, s * 0.75, 0, 0, TAU); g.fill();
+            g.fillStyle = rgba(KOI[(d.hue + 1) % 4], 1);
+            g.beginPath(); g.ellipse(s * 0.6, -s * 0.1, s * 0.7, s * 0.45, 0.3, 0, TAU); g.fill();
+            g.restore();
+          }
           for (const [x, y, r, rot, lotus] of PADS) {
             const [sx, sy] = f.toScreen(x, y), R = r * f.F.u, a0 = rot + Math.sin(c.now * 0.3 + rot) * 0.15;
             g.fillStyle = rgba(PAD, 0.85);
@@ -2012,9 +2070,10 @@
   //  Scene: ripples spread as hexagons like ice crystals, every hit
   //  cracks the ice, snow falls, and an aurora hangs over the far shore.
   // ---------------------------------------------------------------------
+  const KOORI_SKATE = []; // drops carried by a skater (the scene draws the blade marks behind the ring's centre)
   rippleSong({
     id: 'koori', title: 'KOORI', jp: '氷', genre: 'Waltz', level: 5,
-    lede: '凍った湖の夜。オルゴールとピチカートの<strong>3拍子のワルツ</strong>です。波紋は氷の結晶のように六角形に広がり、叩くたびに氷にひびが走ります。石は氷の上を滑ってきます。',
+    lede: '凍った湖の夜の<strong>3拍子のワルツ</strong>。波紋は氷の結晶のように六角形に広がり、叩くたびに氷にひびが走ります。<strong>スケーターが波紋を連れて滑り</strong>、<strong>凍りついて止まる波紋</strong>ではノーツが縁に詰まり、岸の向こうから<strong>巨大な氷の波</strong>が押し寄せます。',
     theme: { ink: '#070b1c', ink2: '#16224a', panel: 'rgba(7, 11, 28, 0.84)', paper: '#eef4ff', muted: '#9aa6c9', accent: '#ffe6a3' },
     hues: ['#9be7ff', '#c7a8ff', '#e8f1ff', '#ffe6a3'],
     bpm: 168, beatsPerBar: 3, bars: 72, speed: 0.1, ring: { sides: 6, rot: 90 }, attractFromBar: 32,
@@ -2038,22 +2097,30 @@
       // INTRO: a drop every two bars, quarter notes
       [[0, 0], [-0.35, 0.1], [0.35, -0.1]].forEach((p, k) => drop(B(k * 2), p, k, '..o.o.o...', { a: -90 + k * 120, turn: 70 }));
       drop(B(6), [0, 0.15], 3, '..o.o.o.o.o.', { a: -90, turn: 60 });
-      // THEME: drops swing from side to side, one every two bars; every fourth ends on a hold
+      // THEME: skaters glide across the ice in curves, their rings carried along; every fourth ends on a hold
       const T = [[-0.4, -0.12], [0.4, 0.12], [-0.3, 0.2], [0.3, -0.2], [-0.45, 0.05], [0.45, -0.05], [0, -0.22], [0, 0.2]];
       T.forEach((p, k) => {
         const pat = k % 4 === 3 ? '..o.H---' : k % 2 ? '..o.ooo.o.' : '..o.o.o.oo';
-        drop(B(8 + k * 2), p, k % 4, pat, { a: p[0] < 0 ? 0 : 180, turn: k % 2 ? -55 : 55 });
+        const s = p[0] < 0 ? 1 : -1, mid = [p[0] + s * 0.15, p[1] + (p[1] < 0 ? 0.12 : -0.12)], end = [p[0] + s * 0.3, p[1]];
+        KOORI_SKATE.push(drop(B(8 + k * 2), p, k % 4, pat, { a: p[0] < 0 ? 0 : 180, turn: k % 2 ? -55 : 55, path: [[2.5, mid[0], mid[1]], [5, end[0], end[1]]] }));
       });
       // BRIDGE: stones slide across the ice, and slow rings to ride round
       skip(B(24), [-0.65, -0.3], [0.6, 0.3], 1, 'o.o.o.o.o.o.', { decay: 0.95 });
       drop(B(26), [0, 0], 3, '..S-----', { a: -90, speed: 0.08, spin: 180 });
-      skip(B(28), [0.65, -0.3], [-0.6, 0.3], 2, 'o.o.o.o.o.o.', { decay: 0.95 });
+      // a ring that freezes: it slows to a stop, and its notes crowd together at the edge
+      drop(B(28), [0.05, 0], 2, '..o.o.o.o.', { speed: 0.22, accel: -0.06, a: -90, turn: 80 });
       drop(B(30), [0, 0], 0, '..S-----', { a: 90, speed: 0.08, spin: -180 });
       // CLIMAX: a drop every bar, leaping across the lake; every fourth bar a hold that turns
       for (let k = 0; k < 16; k++) {
+        if (k === 5 || k === 13) {
+          // the ice heaves: a giant wave from beyond the shore, its notes strung along the arc
+          const c = k === 5 ? [-1.5, -0.95] : [1.5, 0.95], D = Math.hypot(c[0], c[1]), th = Math.atan2(-c[1], -c[0]) / DEG;
+          drop(B(32 + k), c, 3, '..o.oo', { speed: 0.22, r0: D - 0.22 * 1.75, angs: [th - 8, th, th + 6] });
+          continue;
+        }
         const a = k * 135 * DEG, p = [Math.cos(a) * 0.45, Math.sin(a) * 0.24];
         const pat = k % 4 === 3 ? '..S--' : k % 2 ? '..oo.o' : '..o.oo';
-        drop(B(32 + k), p, k % 4, pat, { a: (Math.atan2(-p[1], -p[0]) / DEG) + (k % 2 ? 30 : -30), turn: k % 2 ? 50 : -50, spin: k % 8 === 3 ? 100 : -100 });
+        drop(B(32 + k), p, k % 4, pat, { a: (Math.atan2(-p[1], -p[0]) / DEG) + (k % 2 ? 30 : -30) + (k === 6 ? 150 : 0), turn: k % 2 ? 50 : -50, spin: k % 8 === 3 ? 100 : -100 });
       }
       // REPRISE: two drops land together; one plays two notes, then the other
       for (let k = 0; k < 8; k++) {
@@ -2177,6 +2244,37 @@
           g.stroke();
         },
         surface(c) {
+          // blade marks behind each skater, and the skater's glint
+          for (const d of KOORI_SKATE) {
+            const off = (c.now - d.t) / f.SPB;
+            if (off < 0 || c.now > d.last + 1) continue;
+            const fade = Math.min(1, d.last + 1 - c.now);
+            for (const side of [-1, 1]) {
+              g.strokeStyle = rgba(ICE, 0.35 * fade); g.lineWidth = 1;
+              g.beginPath();
+              for (let k = 0; k <= 16; k++) {
+                const o = Math.max(0, off - 2.5 + (k / 16) * 2.5), [x, y] = f.ringC(d, o), [x2, y2] = f.ringC(d, o + 0.05);
+                const n = Math.atan2(y2 - y, x2 - x) + Math.PI / 2, [sx, sy] = f.toScreen(x + Math.cos(n) * 0.008 * side, y + Math.sin(n) * 0.008 * side);
+                if (k) g.lineTo(sx, sy); else g.moveTo(sx, sy);
+              }
+              g.stroke();
+            }
+            const [sx, sy] = f.toScreen(...f.ringC(d, off));
+            g.fillStyle = rgba(ICE, 0.9 * fade); g.beginPath(); g.arc(sx, sy, 3, 0, TAU); g.fill();
+          }
+          // a freezing ring grows frost spikes as it slows
+          for (const r of f.rings) {
+            if (!(r.d.accel < 0)) continue;
+            const off = (c.now - r.d.t) / f.SPB, v = r.d.speed + r.d.accel * off, still = Math.max(0, 1 - v / r.d.speed);
+            g.strokeStyle = rgba(ICE, 0.6 * still); g.lineWidth = 1.2;
+            g.beginPath();
+            for (let k = 0; k < 18; k++) {
+              const a = (k * TAU) / 18 + r.d.beat, rr = r.R * f.shape(a), len = 0.025 * still * (k % 2 ? 0.6 : 1);
+              const [x0, y0] = f.toScreen(r.x + Math.cos(a) * rr, r.y + Math.sin(a) * rr), [x1, y1] = f.toScreen(r.x + Math.cos(a) * (rr + len), r.y + Math.sin(a) * (rr + len));
+              g.moveTo(x0, y0); g.lineTo(x1, y1);
+            }
+            g.stroke();
+          }
           // each falling drop freezes into a turning snowflake where it lands
           for (const d of f.DROPS) {
             if (d.t > c.now) break;
@@ -2250,9 +2348,11 @@
   //  Scene: paper lanterns drift on the current, stall lights glow on
   //  both banks, embers rise, and fireworks open in the choruses.
   // ---------------------------------------------------------------------
+  const TOUROU_LANTERN = []; // drops carried downstream by a lantern
+  const TOUROU_BURST = []; // drops that are fireworks: a shell rises, bursts, and its ring spreads fast then slows
   rippleSong({
     id: 'tourou', title: 'TOUROU', jp: '灯籠', genre: 'Matsuri Rock', level: 6,
-    lede: '夏祭りの夜の川。太鼓とお囃子に三味線、篠笛、歪んだギターが重なる<strong>和ロック</strong>です。灯籠が流れていくなか、サビでは花火が次々に上がります。',
+    lede: '夏祭りの夜の川の<strong>和ロック</strong>。太鼓の「ドコ」は同じ所を続けて叩き、<strong>灯籠は波紋を乗せて流れ</strong>、サビでは<strong>花火が開く波紋</strong>が勢いよく広がってから止まります。二つの花火が<strong>交わる点</strong>では同時押し。',
     theme: { ink: '#0a0716', ink2: '#24133a', panel: 'rgba(10, 7, 22, 0.84)', paper: '#fff3e6', muted: '#b8a3b0', accent: '#ffc94a' },
     hues: ['#ff5a3c', '#ffc94a', '#ff9ec7', '#8fb4ff'],
     bpm: 150, bars: 44, speed: 0.12, attractFromBar: 16,
@@ -2269,16 +2369,23 @@
       { pad: [62, 65, 69, 72], bass: 38, lead: [81, 79, 77, 74] },
     ],
     kickOn: (bar, name) => name !== 'BREAK',
-    chart({ drop, skip, B }) {
-      // INTRO: the taiko's "don, don, do-ko" from four sides
-      drop(B(0), [-0.3, 0], 0, '..o.o.oo', { a: 0, turn: 60 });
-      drop(B(1), [0.3, 0], 0, '..o.o.oo', { a: 180, turn: -60 });
-      drop(B(2), [0, -0.2], 3, '..o.o.oo', { a: 90, turn: 60 });
+    chart({ drop, skip, pulse, cross, B }) {
+      // INTRO: the taiko's "don, don, do-ko": two strikes, then the "do-ko" twice on one spot
+      [[[-0.3, 0], 0], [[0.3, 0], 180], [[0, -0.2], 90]].forEach(([p, a], k) => {
+        drop(B(k), p, k ? 0 : 3, '..o.o.', { a, turn: 60 });
+        pulse(B(k, 2), p, 0, { a: a + 150, off: 1, n: 2, gap: 0.5, speed: 0.12 });
+      });
       drop(B(3), [0, 0.2], 3, '..o.oooo', { a: -90, turn: -50 });
       // VERSE: a drop every bar, zigzagging over the river, shamisen eighths; every fourth a hold
       const V = [[-0.45, -0.2], [0.45, 0.2], [-0.45, 0.2], [0.45, -0.2], [-0.2, 0.05], [0.25, -0.05], [-0.5, 0], [0.5, 0]];
       const VP = ['..o.oo.o', '..oo.o.o', '..o.oo.o', '..o.H-..'];
-      V.forEach((p, k) => drop(B(4 + k), p, k % 4, VP[k % 4], { a: p[0] < 0 ? 0 : 180, turn: p[1] < 0 ? -50 : 50 }));
+      V.forEach((p, k) => {
+        // every fourth bar a lantern drifts downstream, carrying its ring; ride the light along
+        const o = { a: p[0] < 0 ? 0 : 180, turn: p[1] < 0 ? -50 : 50 };
+        if (k % 4 === 3) { o.path = [[4, p[0] - 0.25, p[1]]]; o.ease = 'linear'; }
+        const d = drop(B(4 + k), p, k % 4, VP[k % 4], o);
+        if (k % 4 === 3) TOUROU_LANTERN.push(d);
+      });
       // BUILD: two stones skip across, then runs that spiral out
       skip(B(12), [0.65, 0.32], [-0.3, -0.1], 1, 'o.o.o.o.');
       skip(B(13), [-0.65, 0.32], [0.3, -0.1], 1, 'o.o.o.o.');
@@ -2287,6 +2394,12 @@
       // CHORUS: a drop every bar leaping across; every fourth bar a hold that circles
       for (let k = 0; k < 8; k++) {
         const a = k * 135 * DEG, p = [Math.cos(a) * 0.45, Math.sin(a) * 0.25];
+        if (k % 4 === 1) {
+          // a firework: it bursts, its ring flies out and slows, the notes thrown wide around it
+          const q = [p[0] * 0.6, p[1] * 0.6];
+          TOUROU_BURST.push(drop(B(16 + k), q, k % 4, '..oooo', { speed: 0.35, accel: -0.12, a: Math.atan2(-q[1], -q[0]) / DEG - 60, turn: 70 }));
+          continue;
+        }
         const pat = ['..o.oo.o', '..oo.oo.', '..o.o.oo', '..S---'][k % 4];
         drop(B(16 + k), p, k % 4, pat, { a: Math.atan2(-p[1], -p[0]) / DEG + 30, turn: k % 2 ? 45 : -45, spin: k === 3 ? 150 : -150 });
       }
@@ -2299,9 +2412,15 @@
       [28, 29, 30, 32, 33, 34].forEach((bar, k) => drop(B(bar), C2[k], k % 4, P2[k], { a: C2[k][0] <= 0 ? 0 : 180, turn: k % 2 ? 40 : -40 }));
       skip(B(31), [-0.6, 0.35], [0.5, 0.3], 0, 'o.o.o.oo');
       drop(B(35), [0, 0], 1, '..S---', { a: -90, spin: 220 });
-      [[36, -0.3, -0.1], [37, 0.3, 0.1], [38, 0.3, -0.12], [39, -0.3, 0.12]].forEach(([b, x, y], k) => drop(B(b), [x, y], k, k % 2 ? '..oo.oo.' : '..o.o.oo', { a: x < 0 ? 0 : 180, turn: y < 0 ? -50 : 50 }));
+      // two fireworks open together; where their rings meet, both keys at once
+      [-0.1, 0.1, -0.05, 0.12].forEach((y, k) => {
+        const A = drop(B(36 + k), [-0.3, y], (k * 2) % 4, '..oo', { a: 0, turn: y < 0 ? 40 : -40 });
+        const Bd = drop(B(36 + k), [0.3, y], (k * 2 + 1) % 4, '....oo', { a: 180, turn: y < 0 ? -40 : 40 });
+        TOUROU_BURST.push(A, Bd);
+        cross(B(36 + k, 3.5), A, Bd);
+      });
       // FINALE
-      drop(B(40), [0, 0], 0, '..o.o.oo', { a: -90, turn: 70 });
+      drop(B(40), [0, 0], 0, '..o.o.oo', { a: 90, turn: 70 });
       drop(B(41), [-0.3, 0], 1, '..o.o.oo', { a: 0, turn: 70 });
       drop(B(42), [0.3, 0], 3, '..o.H---', { a: 180, turn: 70 });
     },
@@ -2482,8 +2601,34 @@
           }
           g.globalCompositeOperation = 'source-over';
         },
-        // paper lanterns drifting downstream
+        // paper lanterns drifting downstream (and the ones carrying rings); firework shells rising to burst
         surface(c) {
+          for (const d of TOUROU_BURST) {
+            const lead = d.t - c.now;
+            if (lead < -0.4 || lead > 0.6) continue;
+            const [x, y] = f.toScreen(d.x, d.y);
+            if (lead > 0) {
+              const h = (lead / 0.6) * f.H * 0.4;
+              g.strokeStyle = rgba(GOLD, 0.8); g.lineWidth = 2;
+              g.beginPath(); g.moveTo(x, y + h + 24); g.lineTo(x, y + h); g.stroke();
+              g.fillStyle = rgba(PAPERL, 0.95); g.beginPath(); g.arc(x, y + h, 3, 0, TAU); g.fill();
+            } else {
+              const u = -lead / 0.4, gl = g.createRadialGradient(x, y, 0, x, y, f.F.u * 0.25);
+              gl.addColorStop(0, rgba(PAPERL, 0.6 * (1 - u))); gl.addColorStop(1, rgba(f.HUES[d.hue], 0));
+              g.fillStyle = gl; g.fillRect(x - f.F.u * 0.25, y - f.F.u * 0.25, f.F.u * 0.5, f.F.u * 0.5);
+            }
+          }
+          for (const d of TOUROU_LANTERN) {
+            const off = (c.now - d.t) / f.SPB;
+            if (off < -1 || c.now > d.last + 1) continue;
+            const a = Math.min(1, off + 1) * Math.min(1, d.last + 1 - c.now), s2 = f.noteR() * 0.9;
+            const [sx, sy] = f.toScreen(...f.ringC(d, Math.max(0, off)));
+            const gl = g.createRadialGradient(sx, sy, 0, sx, sy, s2 * 3.5);
+            gl.addColorStop(0, rgba(WARM, 0.4 * a)); gl.addColorStop(1, rgba(WARM, 0));
+            g.fillStyle = gl; g.fillRect(sx - s2 * 3.5, sy - s2 * 3.5, s2 * 7, s2 * 7);
+            g.fillStyle = rgba(hex('#3a1a10'), 0.9 * a); g.fillRect(sx - s2 * 0.62, sy - s2 * 0.62, s2 * 1.24, s2 * 1.24);
+            g.fillStyle = rgba(PAPERL, 0.95 * a); g.fillRect(sx - s2 / 2, sy - s2 / 2, s2, s2);
+          }
           const s = f.noteR() * 0.85, bright = c.sec.name === 'BREAK' ? 1 : 0.7;
           for (const L of LANTERNS) {
             const x = ((c.now * L.speed + L.off) % 2.2) - 1.1, y = L.y + Math.sin(c.now * 0.7 + L.off * 3) * 0.015;
@@ -2527,9 +2672,10 @@
   // ---------------------------------------------------------------------
   // lightning strikes (beats): the start of each four-bar block of the drops
   const UZU_STRIKES = [48, 64, 80, 96, 144, 160, 176];
+  const UZU_SHOCK = new Map(); // strike beat -> where the bolt hits the water (field units); a shock wave spreads from there
   rippleSong({
     id: 'uzu', title: 'UZU', jp: '渦', genre: 'Drum & Bass', level: 8,
-    lede: '嵐の夜の渦潮。BPM 174 の<strong>ドラムンベース</strong>です。渦が回り、ドロップでは雷が落ちて画面が揺れます。石が一直線に連続で跳ねる<strong>水切り連打</strong>と、渦を巻く長押しが襲ってきます。',
+    lede: '嵐の夜の渦潮の<strong>ドラムンベース</strong>。ドロップでは<strong>雷が落ちた所から衝撃波</strong>が渦を横切り、波紋は<strong>渦に流されて回り</strong>、最後は<strong>渦の目へ引き込まれて縮みます</strong>。石が一直線に跳ねる水切り連打と、渦を巻く長押しも。',
     theme: { ink: '#04030a', ink2: '#160c2e', panel: 'rgba(4, 3, 10, 0.86)', paper: '#f1edff', muted: '#9d95c0', accent: '#d8ff5c' },
     hues: ['#3de8ff', '#a86bff', '#ff3d9a', '#d8ff5c'],
     bpm: 174, bars: 52, speed: 0.11, attractFromBar: 12,
@@ -2560,10 +2706,16 @@
       // from where it ended, a spiral hold, and a run from the other side
       const block = (bar, k) => {
         const s = k % 2 ? 1 : -1;
-        drop(B(bar), [0.42 * s, -0.15], (k * 2) % 4, '..oo.oo.', { a: s < 0 ? 0 : 180, turn: s < 0 ? 30 : -30 });
+        // lightning strikes the water at the edge; its shock wave sweeps down across the whirlpool
+        const hit = [0.35 * s, -0.62];
+        UZU_SHOCK.set(B(bar), hit);
+        drop(B(bar), hit, (k * 2) % 4, '..oo.oo.', { speed: 0.3, r0: 0.1, angs: [90 + 28 * s, 90 + 12 * s, 90 - 4 * s, 90 - 14 * s] });
         skip(B(bar + 1), [0.45 * s, 0.32], [-0.5 * s, -0.25], (k * 2 + 1) % 4, 'oooooooo', { decay: 0.94 });
-        drop(B(bar + 2), [-0.25 * s, 0.15], (k * 2 + 2) % 4, '..S---', { a: s < 0 ? 180 : 0, spin: 200 * s, turn: 60 });
-        drop(B(bar + 3), [0.4 * s, 0.15], (k * 2 + 3) % 4, '..o.oo.o', { a: s < 0 ? 200 : -20, turn: s < 0 ? 40 : -40 });
+        // the current carries this ring round the eye while the hold circles it
+        const orbit = [1, 2, 3, 4].map((o) => { const a = Math.atan2(0.15, -0.25 * s) - o * 0.55 * s; return [o, Math.cos(a) * 0.29, Math.sin(a) * 0.2]; });
+        drop(B(bar + 2), [-0.25 * s, 0.15], (k * 2 + 2) % 4, '..S---', { a: s < 0 ? 180 : 0, spin: 200 * s, turn: 60, path: orbit, ease: 'linear' });
+        // and this one is dragged into the eye: a ring that closes, its notes spiralling inward
+        drop(B(bar + 3), [0.3 * s, 0.1], (k * 2 + 3) % 4, '..o.oo.o', { speed: -0.13, r0: 0.5, a: s < 0 ? 200 : -20, turn: s < 0 ? 60 : -60 });
       };
       [12, 16, 20, 24].forEach((bar, k) => block(bar, k));
       // BREAK: the eye of the storm; one long spiral, then a ride outward
@@ -2574,7 +2726,7 @@
       skip(B(34), [0.65, -0.3], [-0.6, 0.3], 3, 'o.o.o.o.oooooooo', { decay: 0.97 });
       // DROP II: the blocks again, mirrored, then a closing barrage of runs
       [36, 40].forEach((bar, k) => block(bar, k + 1));
-      const R = [[-0.4, -0.15], [0.4, 0.15], [-0.4, 0.15], [0.4, -0.15]];
+      const R = [[0.4, 0.15], [-0.4, -0.15], [0.4, -0.15], [-0.4, 0.15]];
       R.forEach((p, k) => drop(B(44 + k), p, k % 4, k === 3 ? '..oooo..' : '..oo.ooo', { a: p[0] < 0 ? 0 : 180, turn: p[1] < 0 ? -40 : 40 }));
       // OUTRO
       drop(B(48), [0, 0], 0, '..o.o.oo', { a: -90, turn: 70 });
@@ -2669,11 +2821,13 @@
       // a jagged bolt from the top of the screen down to the water
       function drawBolt(beat, age) {
         const rnd = kit.mulberry32(Math.round(beat * 31));
-        let x = (0.2 + rnd() * 0.6) * f.W, y = -10;
-        const endY = f.H * (0.45 + rnd() * 0.4);
+        const hit = UZU_SHOCK.get(beat), [hx, hy] = hit ? f.toScreen(hit[0], hit[1]) : [(0.2 + rnd() * 0.6) * f.W, f.H * (0.45 + rnd() * 0.4)];
+        let x = hx + (rnd() - 0.5) * 120, y = -10;
+        const endY = hy;
         g.strokeStyle = rgba(BOLT, 0.9 * (1 - age / 0.2)); g.lineWidth = 2.5;
         g.beginPath(); g.moveTo(x, y);
-        while (y < endY) { x += (rnd() - 0.5) * 60; y += 20 + rnd() * 30; g.lineTo(x, y); }
+        while (y < endY - 30) { x += (hx - x) * 0.25 + (rnd() - 0.5) * 50; y += 20 + rnd() * 30; g.lineTo(x, y); }
+        g.lineTo(hx, hy);
         g.stroke();
       }
       return {

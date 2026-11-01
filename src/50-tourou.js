@@ -6,9 +6,11 @@
   //  Scene: paper lanterns drift on the current, stall lights glow on
   //  both banks, embers rise, and fireworks open in the choruses.
   // ---------------------------------------------------------------------
+  const TOUROU_LANTERN = []; // drops carried downstream by a lantern
+  const TOUROU_BURST = []; // drops that are fireworks: a shell rises, bursts, and its ring spreads fast then slows
   rippleSong({
     id: 'tourou', title: 'TOUROU', jp: '灯籠', genre: 'Matsuri Rock', level: 6,
-    lede: '夏祭りの夜の川。太鼓とお囃子に三味線、篠笛、歪んだギターが重なる<strong>和ロック</strong>です。灯籠が流れていくなか、サビでは花火が次々に上がります。',
+    lede: '夏祭りの夜の川の<strong>和ロック</strong>。太鼓の「ドコ」は同じ所を続けて叩き、<strong>灯籠は波紋を乗せて流れ</strong>、サビでは<strong>花火が開く波紋</strong>が勢いよく広がってから止まります。二つの花火が<strong>交わる点</strong>では同時押し。',
     theme: { ink: '#0a0716', ink2: '#24133a', panel: 'rgba(10, 7, 22, 0.84)', paper: '#fff3e6', muted: '#b8a3b0', accent: '#ffc94a' },
     hues: ['#ff5a3c', '#ffc94a', '#ff9ec7', '#8fb4ff'],
     bpm: 150, bars: 44, speed: 0.12, attractFromBar: 16,
@@ -25,16 +27,23 @@
       { pad: [62, 65, 69, 72], bass: 38, lead: [81, 79, 77, 74] },
     ],
     kickOn: (bar, name) => name !== 'BREAK',
-    chart({ drop, skip, B }) {
-      // INTRO: the taiko's "don, don, do-ko" from four sides
-      drop(B(0), [-0.3, 0], 0, '..o.o.oo', { a: 0, turn: 60 });
-      drop(B(1), [0.3, 0], 0, '..o.o.oo', { a: 180, turn: -60 });
-      drop(B(2), [0, -0.2], 3, '..o.o.oo', { a: 90, turn: 60 });
+    chart({ drop, skip, pulse, cross, B }) {
+      // INTRO: the taiko's "don, don, do-ko": two strikes, then the "do-ko" twice on one spot
+      [[[-0.3, 0], 0], [[0.3, 0], 180], [[0, -0.2], 90]].forEach(([p, a], k) => {
+        drop(B(k), p, k ? 0 : 3, '..o.o.', { a, turn: 60 });
+        pulse(B(k, 2), p, 0, { a: a + 150, off: 1, n: 2, gap: 0.5, speed: 0.12 });
+      });
       drop(B(3), [0, 0.2], 3, '..o.oooo', { a: -90, turn: -50 });
       // VERSE: a drop every bar, zigzagging over the river, shamisen eighths; every fourth a hold
       const V = [[-0.45, -0.2], [0.45, 0.2], [-0.45, 0.2], [0.45, -0.2], [-0.2, 0.05], [0.25, -0.05], [-0.5, 0], [0.5, 0]];
       const VP = ['..o.oo.o', '..oo.o.o', '..o.oo.o', '..o.H-..'];
-      V.forEach((p, k) => drop(B(4 + k), p, k % 4, VP[k % 4], { a: p[0] < 0 ? 0 : 180, turn: p[1] < 0 ? -50 : 50 }));
+      V.forEach((p, k) => {
+        // every fourth bar a lantern drifts downstream, carrying its ring; ride the light along
+        const o = { a: p[0] < 0 ? 0 : 180, turn: p[1] < 0 ? -50 : 50 };
+        if (k % 4 === 3) { o.path = [[4, p[0] - 0.25, p[1]]]; o.ease = 'linear'; }
+        const d = drop(B(4 + k), p, k % 4, VP[k % 4], o);
+        if (k % 4 === 3) TOUROU_LANTERN.push(d);
+      });
       // BUILD: two stones skip across, then runs that spiral out
       skip(B(12), [0.65, 0.32], [-0.3, -0.1], 1, 'o.o.o.o.');
       skip(B(13), [-0.65, 0.32], [0.3, -0.1], 1, 'o.o.o.o.');
@@ -43,6 +52,12 @@
       // CHORUS: a drop every bar leaping across; every fourth bar a hold that circles
       for (let k = 0; k < 8; k++) {
         const a = k * 135 * DEG, p = [Math.cos(a) * 0.45, Math.sin(a) * 0.25];
+        if (k % 4 === 1) {
+          // a firework: it bursts, its ring flies out and slows, the notes thrown wide around it
+          const q = [p[0] * 0.6, p[1] * 0.6];
+          TOUROU_BURST.push(drop(B(16 + k), q, k % 4, '..oooo', { speed: 0.35, accel: -0.12, a: Math.atan2(-q[1], -q[0]) / DEG - 60, turn: 70 }));
+          continue;
+        }
         const pat = ['..o.oo.o', '..oo.oo.', '..o.o.oo', '..S---'][k % 4];
         drop(B(16 + k), p, k % 4, pat, { a: Math.atan2(-p[1], -p[0]) / DEG + 30, turn: k % 2 ? 45 : -45, spin: k === 3 ? 150 : -150 });
       }
@@ -55,9 +70,15 @@
       [28, 29, 30, 32, 33, 34].forEach((bar, k) => drop(B(bar), C2[k], k % 4, P2[k], { a: C2[k][0] <= 0 ? 0 : 180, turn: k % 2 ? 40 : -40 }));
       skip(B(31), [-0.6, 0.35], [0.5, 0.3], 0, 'o.o.o.oo');
       drop(B(35), [0, 0], 1, '..S---', { a: -90, spin: 220 });
-      [[36, -0.3, -0.1], [37, 0.3, 0.1], [38, 0.3, -0.12], [39, -0.3, 0.12]].forEach(([b, x, y], k) => drop(B(b), [x, y], k, k % 2 ? '..oo.oo.' : '..o.o.oo', { a: x < 0 ? 0 : 180, turn: y < 0 ? -50 : 50 }));
+      // two fireworks open together; where their rings meet, both keys at once
+      [-0.1, 0.1, -0.05, 0.12].forEach((y, k) => {
+        const A = drop(B(36 + k), [-0.3, y], (k * 2) % 4, '..oo', { a: 0, turn: y < 0 ? 40 : -40 });
+        const Bd = drop(B(36 + k), [0.3, y], (k * 2 + 1) % 4, '....oo', { a: 180, turn: y < 0 ? -40 : 40 });
+        TOUROU_BURST.push(A, Bd);
+        cross(B(36 + k, 3.5), A, Bd);
+      });
       // FINALE
-      drop(B(40), [0, 0], 0, '..o.o.oo', { a: -90, turn: 70 });
+      drop(B(40), [0, 0], 0, '..o.o.oo', { a: 90, turn: 70 });
       drop(B(41), [-0.3, 0], 1, '..o.o.oo', { a: 0, turn: 70 });
       drop(B(42), [0.3, 0], 3, '..o.H---', { a: 180, turn: 70 });
     },
@@ -238,8 +259,34 @@
           }
           g.globalCompositeOperation = 'source-over';
         },
-        // paper lanterns drifting downstream
+        // paper lanterns drifting downstream (and the ones carrying rings); firework shells rising to burst
         surface(c) {
+          for (const d of TOUROU_BURST) {
+            const lead = d.t - c.now;
+            if (lead < -0.4 || lead > 0.6) continue;
+            const [x, y] = f.toScreen(d.x, d.y);
+            if (lead > 0) {
+              const h = (lead / 0.6) * f.H * 0.4;
+              g.strokeStyle = rgba(GOLD, 0.8); g.lineWidth = 2;
+              g.beginPath(); g.moveTo(x, y + h + 24); g.lineTo(x, y + h); g.stroke();
+              g.fillStyle = rgba(PAPERL, 0.95); g.beginPath(); g.arc(x, y + h, 3, 0, TAU); g.fill();
+            } else {
+              const u = -lead / 0.4, gl = g.createRadialGradient(x, y, 0, x, y, f.F.u * 0.25);
+              gl.addColorStop(0, rgba(PAPERL, 0.6 * (1 - u))); gl.addColorStop(1, rgba(f.HUES[d.hue], 0));
+              g.fillStyle = gl; g.fillRect(x - f.F.u * 0.25, y - f.F.u * 0.25, f.F.u * 0.5, f.F.u * 0.5);
+            }
+          }
+          for (const d of TOUROU_LANTERN) {
+            const off = (c.now - d.t) / f.SPB;
+            if (off < -1 || c.now > d.last + 1) continue;
+            const a = Math.min(1, off + 1) * Math.min(1, d.last + 1 - c.now), s2 = f.noteR() * 0.9;
+            const [sx, sy] = f.toScreen(...f.ringC(d, Math.max(0, off)));
+            const gl = g.createRadialGradient(sx, sy, 0, sx, sy, s2 * 3.5);
+            gl.addColorStop(0, rgba(WARM, 0.4 * a)); gl.addColorStop(1, rgba(WARM, 0));
+            g.fillStyle = gl; g.fillRect(sx - s2 * 3.5, sy - s2 * 3.5, s2 * 7, s2 * 7);
+            g.fillStyle = rgba(hex('#3a1a10'), 0.9 * a); g.fillRect(sx - s2 * 0.62, sy - s2 * 0.62, s2 * 1.24, s2 * 1.24);
+            g.fillStyle = rgba(PAPERL, 0.95 * a); g.fillRect(sx - s2 / 2, sy - s2 / 2, s2, s2);
+          }
           const s = f.noteR() * 0.85, bright = c.sec.name === 'BREAK' ? 1 : 0.7;
           for (const L of LANTERNS) {
             const x = ((c.now * L.speed + L.off) % 2.2) - 1.1, y = L.y + Math.sin(c.now * 0.7 + L.off * 3) * 0.015;

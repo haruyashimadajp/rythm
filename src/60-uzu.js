@@ -7,9 +7,10 @@
   // ---------------------------------------------------------------------
   // lightning strikes (beats): the start of each four-bar block of the drops
   const UZU_STRIKES = [48, 64, 80, 96, 144, 160, 176];
+  const UZU_SHOCK = new Map(); // strike beat -> where the bolt hits the water (field units); a shock wave spreads from there
   rippleSong({
     id: 'uzu', title: 'UZU', jp: '渦', genre: 'Drum & Bass', level: 8,
-    lede: '嵐の夜の渦潮。BPM 174 の<strong>ドラムンベース</strong>です。渦が回り、ドロップでは雷が落ちて画面が揺れます。石が一直線に連続で跳ねる<strong>水切り連打</strong>と、渦を巻く長押しが襲ってきます。',
+    lede: '嵐の夜の渦潮の<strong>ドラムンベース</strong>。ドロップでは<strong>雷が落ちた所から衝撃波</strong>が渦を横切り、波紋は<strong>渦に流されて回り</strong>、最後は<strong>渦の目へ引き込まれて縮みます</strong>。石が一直線に跳ねる水切り連打と、渦を巻く長押しも。',
     theme: { ink: '#04030a', ink2: '#160c2e', panel: 'rgba(4, 3, 10, 0.86)', paper: '#f1edff', muted: '#9d95c0', accent: '#d8ff5c' },
     hues: ['#3de8ff', '#a86bff', '#ff3d9a', '#d8ff5c'],
     bpm: 174, bars: 52, speed: 0.11, attractFromBar: 12,
@@ -40,10 +41,16 @@
       // from where it ended, a spiral hold, and a run from the other side
       const block = (bar, k) => {
         const s = k % 2 ? 1 : -1;
-        drop(B(bar), [0.42 * s, -0.15], (k * 2) % 4, '..oo.oo.', { a: s < 0 ? 0 : 180, turn: s < 0 ? 30 : -30 });
+        // lightning strikes the water at the edge; its shock wave sweeps down across the whirlpool
+        const hit = [0.35 * s, -0.62];
+        UZU_SHOCK.set(B(bar), hit);
+        drop(B(bar), hit, (k * 2) % 4, '..oo.oo.', { speed: 0.3, r0: 0.1, angs: [90 + 28 * s, 90 + 12 * s, 90 - 4 * s, 90 - 14 * s] });
         skip(B(bar + 1), [0.45 * s, 0.32], [-0.5 * s, -0.25], (k * 2 + 1) % 4, 'oooooooo', { decay: 0.94 });
-        drop(B(bar + 2), [-0.25 * s, 0.15], (k * 2 + 2) % 4, '..S---', { a: s < 0 ? 180 : 0, spin: 200 * s, turn: 60 });
-        drop(B(bar + 3), [0.4 * s, 0.15], (k * 2 + 3) % 4, '..o.oo.o', { a: s < 0 ? 200 : -20, turn: s < 0 ? 40 : -40 });
+        // the current carries this ring round the eye while the hold circles it
+        const orbit = [1, 2, 3, 4].map((o) => { const a = Math.atan2(0.15, -0.25 * s) - o * 0.55 * s; return [o, Math.cos(a) * 0.29, Math.sin(a) * 0.2]; });
+        drop(B(bar + 2), [-0.25 * s, 0.15], (k * 2 + 2) % 4, '..S---', { a: s < 0 ? 180 : 0, spin: 200 * s, turn: 60, path: orbit, ease: 'linear' });
+        // and this one is dragged into the eye: a ring that closes, its notes spiralling inward
+        drop(B(bar + 3), [0.3 * s, 0.1], (k * 2 + 3) % 4, '..o.oo.o', { speed: -0.13, r0: 0.5, a: s < 0 ? 200 : -20, turn: s < 0 ? 60 : -60 });
       };
       [12, 16, 20, 24].forEach((bar, k) => block(bar, k));
       // BREAK: the eye of the storm; one long spiral, then a ride outward
@@ -54,7 +61,7 @@
       skip(B(34), [0.65, -0.3], [-0.6, 0.3], 3, 'o.o.o.o.oooooooo', { decay: 0.97 });
       // DROP II: the blocks again, mirrored, then a closing barrage of runs
       [36, 40].forEach((bar, k) => block(bar, k + 1));
-      const R = [[-0.4, -0.15], [0.4, 0.15], [-0.4, 0.15], [0.4, -0.15]];
+      const R = [[0.4, 0.15], [-0.4, -0.15], [0.4, -0.15], [-0.4, 0.15]];
       R.forEach((p, k) => drop(B(44 + k), p, k % 4, k === 3 ? '..oooo..' : '..oo.ooo', { a: p[0] < 0 ? 0 : 180, turn: p[1] < 0 ? -40 : 40 }));
       // OUTRO
       drop(B(48), [0, 0], 0, '..o.o.oo', { a: -90, turn: 70 });
@@ -149,11 +156,13 @@
       // a jagged bolt from the top of the screen down to the water
       function drawBolt(beat, age) {
         const rnd = kit.mulberry32(Math.round(beat * 31));
-        let x = (0.2 + rnd() * 0.6) * f.W, y = -10;
-        const endY = f.H * (0.45 + rnd() * 0.4);
+        const hit = UZU_SHOCK.get(beat), [hx, hy] = hit ? f.toScreen(hit[0], hit[1]) : [(0.2 + rnd() * 0.6) * f.W, f.H * (0.45 + rnd() * 0.4)];
+        let x = hx + (rnd() - 0.5) * 120, y = -10;
+        const endY = hy;
         g.strokeStyle = rgba(BOLT, 0.9 * (1 - age / 0.2)); g.lineWidth = 2.5;
         g.beginPath(); g.moveTo(x, y);
-        while (y < endY) { x += (rnd() - 0.5) * 60; y += 20 + rnd() * 30; g.lineTo(x, y); }
+        while (y < endY - 30) { x += (hx - x) * 0.25 + (rnd() - 0.5) * 50; y += 20 + rnd() * 30; g.lineTo(x, y); }
+        g.lineTo(hx, hy);
         g.stroke();
       }
       return {

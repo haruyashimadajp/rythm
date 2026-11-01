@@ -5,9 +5,10 @@
   //  Scene: ripples spread as hexagons like ice crystals, every hit
   //  cracks the ice, snow falls, and an aurora hangs over the far shore.
   // ---------------------------------------------------------------------
+  const KOORI_SKATE = []; // drops carried by a skater (the scene draws the blade marks behind the ring's centre)
   rippleSong({
     id: 'koori', title: 'KOORI', jp: '氷', genre: 'Waltz', level: 5,
-    lede: '凍った湖の夜。オルゴールとピチカートの<strong>3拍子のワルツ</strong>です。波紋は氷の結晶のように六角形に広がり、叩くたびに氷にひびが走ります。石は氷の上を滑ってきます。',
+    lede: '凍った湖の夜の<strong>3拍子のワルツ</strong>。波紋は氷の結晶のように六角形に広がり、叩くたびに氷にひびが走ります。<strong>スケーターが波紋を連れて滑り</strong>、<strong>凍りついて止まる波紋</strong>ではノーツが縁に詰まり、岸の向こうから<strong>巨大な氷の波</strong>が押し寄せます。',
     theme: { ink: '#070b1c', ink2: '#16224a', panel: 'rgba(7, 11, 28, 0.84)', paper: '#eef4ff', muted: '#9aa6c9', accent: '#ffe6a3' },
     hues: ['#9be7ff', '#c7a8ff', '#e8f1ff', '#ffe6a3'],
     bpm: 168, beatsPerBar: 3, bars: 72, speed: 0.1, ring: { sides: 6, rot: 90 }, attractFromBar: 32,
@@ -31,22 +32,30 @@
       // INTRO: a drop every two bars, quarter notes
       [[0, 0], [-0.35, 0.1], [0.35, -0.1]].forEach((p, k) => drop(B(k * 2), p, k, '..o.o.o...', { a: -90 + k * 120, turn: 70 }));
       drop(B(6), [0, 0.15], 3, '..o.o.o.o.o.', { a: -90, turn: 60 });
-      // THEME: drops swing from side to side, one every two bars; every fourth ends on a hold
+      // THEME: skaters glide across the ice in curves, their rings carried along; every fourth ends on a hold
       const T = [[-0.4, -0.12], [0.4, 0.12], [-0.3, 0.2], [0.3, -0.2], [-0.45, 0.05], [0.45, -0.05], [0, -0.22], [0, 0.2]];
       T.forEach((p, k) => {
         const pat = k % 4 === 3 ? '..o.H---' : k % 2 ? '..o.ooo.o.' : '..o.o.o.oo';
-        drop(B(8 + k * 2), p, k % 4, pat, { a: p[0] < 0 ? 0 : 180, turn: k % 2 ? -55 : 55 });
+        const s = p[0] < 0 ? 1 : -1, mid = [p[0] + s * 0.15, p[1] + (p[1] < 0 ? 0.12 : -0.12)], end = [p[0] + s * 0.3, p[1]];
+        KOORI_SKATE.push(drop(B(8 + k * 2), p, k % 4, pat, { a: p[0] < 0 ? 0 : 180, turn: k % 2 ? -55 : 55, path: [[2.5, mid[0], mid[1]], [5, end[0], end[1]]] }));
       });
       // BRIDGE: stones slide across the ice, and slow rings to ride round
       skip(B(24), [-0.65, -0.3], [0.6, 0.3], 1, 'o.o.o.o.o.o.', { decay: 0.95 });
       drop(B(26), [0, 0], 3, '..S-----', { a: -90, speed: 0.08, spin: 180 });
-      skip(B(28), [0.65, -0.3], [-0.6, 0.3], 2, 'o.o.o.o.o.o.', { decay: 0.95 });
+      // a ring that freezes: it slows to a stop, and its notes crowd together at the edge
+      drop(B(28), [0.05, 0], 2, '..o.o.o.o.', { speed: 0.22, accel: -0.06, a: -90, turn: 80 });
       drop(B(30), [0, 0], 0, '..S-----', { a: 90, speed: 0.08, spin: -180 });
       // CLIMAX: a drop every bar, leaping across the lake; every fourth bar a hold that turns
       for (let k = 0; k < 16; k++) {
+        if (k === 5 || k === 13) {
+          // the ice heaves: a giant wave from beyond the shore, its notes strung along the arc
+          const c = k === 5 ? [-1.5, -0.95] : [1.5, 0.95], D = Math.hypot(c[0], c[1]), th = Math.atan2(-c[1], -c[0]) / DEG;
+          drop(B(32 + k), c, 3, '..o.oo', { speed: 0.22, r0: D - 0.22 * 1.75, angs: [th - 8, th, th + 6] });
+          continue;
+        }
         const a = k * 135 * DEG, p = [Math.cos(a) * 0.45, Math.sin(a) * 0.24];
         const pat = k % 4 === 3 ? '..S--' : k % 2 ? '..oo.o' : '..o.oo';
-        drop(B(32 + k), p, k % 4, pat, { a: (Math.atan2(-p[1], -p[0]) / DEG) + (k % 2 ? 30 : -30), turn: k % 2 ? 50 : -50, spin: k % 8 === 3 ? 100 : -100 });
+        drop(B(32 + k), p, k % 4, pat, { a: (Math.atan2(-p[1], -p[0]) / DEG) + (k % 2 ? 30 : -30) + (k === 6 ? 150 : 0), turn: k % 2 ? 50 : -50, spin: k % 8 === 3 ? 100 : -100 });
       }
       // REPRISE: two drops land together; one plays two notes, then the other
       for (let k = 0; k < 8; k++) {
@@ -170,6 +179,37 @@
           g.stroke();
         },
         surface(c) {
+          // blade marks behind each skater, and the skater's glint
+          for (const d of KOORI_SKATE) {
+            const off = (c.now - d.t) / f.SPB;
+            if (off < 0 || c.now > d.last + 1) continue;
+            const fade = Math.min(1, d.last + 1 - c.now);
+            for (const side of [-1, 1]) {
+              g.strokeStyle = rgba(ICE, 0.35 * fade); g.lineWidth = 1;
+              g.beginPath();
+              for (let k = 0; k <= 16; k++) {
+                const o = Math.max(0, off - 2.5 + (k / 16) * 2.5), [x, y] = f.ringC(d, o), [x2, y2] = f.ringC(d, o + 0.05);
+                const n = Math.atan2(y2 - y, x2 - x) + Math.PI / 2, [sx, sy] = f.toScreen(x + Math.cos(n) * 0.008 * side, y + Math.sin(n) * 0.008 * side);
+                if (k) g.lineTo(sx, sy); else g.moveTo(sx, sy);
+              }
+              g.stroke();
+            }
+            const [sx, sy] = f.toScreen(...f.ringC(d, off));
+            g.fillStyle = rgba(ICE, 0.9 * fade); g.beginPath(); g.arc(sx, sy, 3, 0, TAU); g.fill();
+          }
+          // a freezing ring grows frost spikes as it slows
+          for (const r of f.rings) {
+            if (!(r.d.accel < 0)) continue;
+            const off = (c.now - r.d.t) / f.SPB, v = r.d.speed + r.d.accel * off, still = Math.max(0, 1 - v / r.d.speed);
+            g.strokeStyle = rgba(ICE, 0.6 * still); g.lineWidth = 1.2;
+            g.beginPath();
+            for (let k = 0; k < 18; k++) {
+              const a = (k * TAU) / 18 + r.d.beat, rr = r.R * f.shape(a), len = 0.025 * still * (k % 2 ? 0.6 : 1);
+              const [x0, y0] = f.toScreen(r.x + Math.cos(a) * rr, r.y + Math.sin(a) * rr), [x1, y1] = f.toScreen(r.x + Math.cos(a) * (rr + len), r.y + Math.sin(a) * (rr + len));
+              g.moveTo(x0, y0); g.lineTo(x1, y1);
+            }
+            g.stroke();
+          }
           // each falling drop freezes into a turning snowflake where it lands
           for (const d of f.DROPS) {
             if (d.t > c.now) break;

@@ -5,9 +5,10 @@
   //  Scene: koi gliding under the surface, lily pads with lotus flowers
   //  that bounce on the kick, caustic light and sun glints.
   // ---------------------------------------------------------------------
+  const KOI_SWIM = []; // drops carried by a swimming koi (the scene draws the fish at the ring's centre)
   rippleSong({
     id: 'koi', title: 'KOI', jp: '鯉', genre: 'Disco House', level: 4,
-    lede: '陽の差す池。鯉がゆったり泳ぐ下で、四つ打ちのハウスが鳴り続けます。裏拍のベースとピアノに乗って、<strong>8分の連打</strong>と<strong>回る長押し</strong>が始まります。',
+    lede: '陽の差す池で四つ打ちのハウス。サビでは<strong>泳ぐ鯉が波紋を連れて</strong>水面を横切り、鯉の口が水面を<strong>パクパクと同じ所で叩き</strong>、二匹の鯉の波紋が<strong>交わる点</strong>で同時押し。回る長押しも始まります。',
     theme: { ink: '#03140f', ink2: '#0b3a2c', panel: 'rgba(3, 20, 15, 0.84)', paper: '#f2f7ee', muted: '#94b8a6', accent: '#ffd25e' },
     hues: ['#ff8a3d', '#ffd25e', '#4fe0b0', '#ff7eb6'],
     bpm: 124, bars: 40, speed: 0.12, attractFromBar: 16,
@@ -24,7 +25,7 @@
       { pad: [59, 62, 66, 67], bass: 40, lead: [67, 71, 74, 76] },
     ],
     kickOn: (bar, name) => name !== 'INTRO' && name !== 'BREAK',
-    chart({ drop, skip, B }) {
+    chart({ drop, skip, pulse, cross, B }) {
       // INTRO
       drop(B(0), [0, 0], 2, '..o.o.o.o.', { a: -90, turn: 80 });
       drop(B(1, 2), [-0.35, 0.05], 0, '..o.o.o.', { a: 0, turn: -60 });
@@ -32,11 +33,12 @@
       drop(B(3, 2), [-0.1, 0.25], 3, '..o.o.', { a: -90, turn: 50 });
       // GROOVE: eighth pairs, short answers from the middle, a hold, a skipping stone
       drop(B(4), [0.4, -0.15], 0, '..o.o.oo.o', { a: 180, turn: -45 });
-      drop(B(5, 2), [-0.1, 0.2], 3, '..o.oo', { a: -90, turn: 45 });
+      // a koi's mouth breaks the surface: one spot, three times
+      pulse(B(5, 2), [-0.1, 0.2], 3, { a: -90, off: 1, n: 3, gap: 0.5 });
       drop(B(6), [-0.4, 0.15], 1, '..o.o.oo.o', { a: 0, turn: -45 });
-      drop(B(7, 2), [0.1, -0.2], 2, '..o.oo', { a: 90, turn: 45 });
+      pulse(B(7, 2), [0.1, -0.2], 2, { a: 90, off: 1, n: 3, gap: 0.5 });
       drop(B(8), [0.35, 0.18], 2, '..o.ooH---', { a: 200, turn: 50 });
-      drop(B(9, 2), [-0.3, -0.15], 0, '..o.oo', { a: 0, turn: 40 });
+      pulse(B(9, 2), [-0.3, -0.15], 0, { a: 0, off: 1, n: 3, gap: 0.5 });
       skip(B(10, 1), [-0.65, 0.3], [0.1, 0], 3, 'o.o.o.oo');
       drop(B(11), [0.4, 0], 0, '..o.o.o.', { a: 180, turn: -50 });
       // BUILD: two drops land together and take turns, left, right, left, right; then a run
@@ -45,19 +47,21 @@
         drop(B(b), [x2, y2], 3, '....o...o.', { a: 180, turn: -40 });
       });
       drop(B(15), [0, 0], 1, '..o.oooo', { a: -90, turn: 40 });
-      // CHORUS: a drop every bar from somewhere new; every fourth ends in a hold that circles round
+      // CHORUS: each bar a koi swims across, its ring trailing from it; every fourth ends in a hold that circles round
       const SRC = [[-0.45, -0.18], [0.45, 0.18], [0.45, -0.18], [-0.45, 0.18], [0, -0.22], [0, 0.22], [-0.5, 0], [0.5, 0]];
       SRC.forEach((p, k) => {
         const pat = k % 4 === 3 ? '..o.S---' : k % 2 ? '..o.oo.o' : '..o.o.oo';
-        drop(B(16 + k), p, k % 4, pat, { a: k % 2 ? 200 : -20, turn: 40, spin: k === 3 ? 140 : -140 });
+        const q = [p[0] * 0.3 + (k % 2 ? -0.15 : 0.15), p[1] * -0.4];
+        KOI_SWIM.push(drop(B(16 + k), p, k % 4, pat, { a: k % 2 ? 200 : -20, turn: 40, spin: k === 3 ? 140 : -140, path: [[4, q[0], q[1]]] }));
       });
       // BREAK: a slow ring to ride, then a long skip across the pond
       drop(B(24), [0, 0], 2, '..H---..S---', { a: -90, turn: 135, speed: 0.09, spin: -120 });
       skip(B(26, 1), [0.62, 0.3], [-0.3, -0.12], 0, 'o.o.o.o.o.oo');
-      // CHORUS II: one side calls, the other answers
-      [[28, -0.4, -0.15, 0.4, 0.15], [30, 0.4, -0.15, -0.4, 0.15], [32, 0, -0.25, 0, 0.25]].forEach(([b, x1, y1, x2, y2], k) => {
-        drop(B(b), [x1, y1], (k * 2) % 4, '..o.o.oo', { a: -60, turn: 30 });
-        drop(B(b + 1), [x2, y2], (k * 2 + 1) % 4, '..o.o.oo', { a: 120, turn: 30 });
+      // CHORUS II: two koi surface together; one, then the other, and where their rings meet, both keys at once
+      [-0.1, 0.1, -0.05, 0.12, -0.12, 0.06].forEach((y, k) => {
+        const A = drop(B(28 + k), [-0.3, y], (k * 2) % 4, '..oo', { a: 0, turn: y < 0 ? 40 : -40 });
+        const Bd = drop(B(28 + k), [0.3, y], (k * 2 + 1) % 4, '....oo', { a: 180, turn: y < 0 ? -40 : 40 });
+        cross(B(28 + k, 3.5), A, Bd);
       });
       drop(B(34), [-0.3, 0], 1, '..o.oo.oo.', { a: 0, turn: 50 });
       drop(B(35), [0.3, 0], 3, '..o.H---', { a: 180, turn: 50 });
@@ -193,8 +197,23 @@
           g.fillStyle = ray; g.fillRect(0, 0, f.W, f.H);
           for (const fi of FISH) drawFish(fi, c.now);
         },
-        // lily pads, and lotus flowers that bounce on the kick
+        // lily pads, and lotus flowers that bounce on the kick; the koi that carry rings
         surface(c) {
+          for (const d of KOI_SWIM) {
+            const off = (c.now - d.t) / f.SPB;
+            if (off < -0.5 || c.now > d.last + 0.5) continue;
+            const a = Math.min(1, (off + 0.5) * 2) * Math.min(1, (d.last + 0.5 - c.now) * 2);
+            const [x, y] = f.ringC(d, off), [x2, y2] = f.ringC(d, off + 0.3);
+            const [sx, sy] = f.toScreen(x, y), [tx, ty] = f.toScreen(x2, y2);
+            const ang = Math.hypot(tx - sx, ty - sy) > 0.5 ? Math.atan2(ty - sy, tx - sx) : 0, s = f.F.u * 0.032, wag = Math.sin(c.now * 7) * 0.35;
+            g.save(); g.translate(sx, sy); g.rotate(ang); g.globalAlpha = 0.9 * a;
+            g.fillStyle = rgba(KOI[d.hue % 4], 1);
+            g.beginPath(); g.moveTo(-s * 2.2, 0); g.lineTo(-s * 3.2, -s * 0.9 + wag * s); g.lineTo(-s * 3.2, s * 0.9 + wag * s); g.closePath(); g.fill();
+            g.beginPath(); g.ellipse(0, 0, s * 2.3, s * 0.75, 0, 0, TAU); g.fill();
+            g.fillStyle = rgba(KOI[(d.hue + 1) % 4], 1);
+            g.beginPath(); g.ellipse(s * 0.6, -s * 0.1, s * 0.7, s * 0.45, 0.3, 0, TAU); g.fill();
+            g.restore();
+          }
           for (const [x, y, r, rot, lotus] of PADS) {
             const [sx, sy] = f.toScreen(x, y), R = r * f.F.u, a0 = rot + Math.sin(c.now * 0.3 + rot) * 0.15;
             g.fillStyle = rgba(PAD, 0.85);

@@ -7,7 +7,7 @@
   // ---------------------------------------------------------------------
   rippleSong({
     id: 'shizuku', title: 'SHIZUKU', jp: '雫', genre: 'Lo-fi Hip Hop', level: 2,
-    lede: '雨の夜の水たまり。ローファイ・ヒップホップのゆったりしたビートに合わせて、波紋の基本と、跳ねてくる石を叩く<strong>水切り</strong>を覚える一曲です。',
+    lede: '雨の夜の水たまり。ローファイ・ヒップホップのゆったりしたビートで、波紋の基本と<strong>水切り</strong>を覚える一曲。軒先からは<strong>雫が同じ所に落ち続け</strong>、二つの雨粒の波紋が<strong>交わる点</strong>では同時押し、窓を伝う雫は波紋ごと流れていきます。',
     theme: { ink: '#060d16', ink2: '#0f2233', panel: 'rgba(6, 13, 22, 0.84)', paper: '#e9f1f5', muted: '#8ea4b3', accent: '#ffc27a' },
     hues: ['#7fd8e6', '#a7a4ff', '#ffc27a', '#ff9fb8'],
     bpm: 84, bars: 32, speed: 0.1, attractFromBar: 12,
@@ -23,18 +23,19 @@
       { pad: [55, 59, 62, 64], bass: 36, lead: [67, 71, 74, 76], ep: [52, 55, 59, 62] },
     ],
     kickOn: (bar, name) => name !== 'INTRO' && name !== 'BREAK',
-    chart({ drop, skip, B }) {
+    chart({ drop, skip, pulse, cross, B }) {
       // INTRO: one drop at a time, half notes, then quarters
       drop(B(0), [0, 0], 0, '..o...o...o.', { a: -90, turn: 90 });
       drop(B(1, 2), [-0.35, 0.1], 1, '..o...o.o.', { a: 0, turn: -70 });
       drop(B(3), [0.3, -0.1], 2, '..o.o.o.', { a: 180, turn: 60 });
       // VERSE: drops alternate sides with a short answer between; a first eighth pair, a first hold
       drop(B(4), [0.35, -0.12], 2, '..o.o.o.oo', { a: 180, turn: 55 });
-      drop(B(5, 2), [-0.05, 0.25], 0, '..o.o.', { a: -90, turn: 60 });
+      // drips from the eaves: the same spot, twice
+      pulse(B(5, 2), [-0.05, 0.25], 0, { a: -90, off: 1, n: 2, gap: 1 });
       drop(B(6), [-0.35, 0.12], 3, '..o.o.o.oo', { a: 0, turn: -55 });
-      drop(B(7, 2), [0.05, -0.25], 1, '..o.o.', { a: 90, turn: -60 });
+      pulse(B(7, 2), [0.05, -0.25], 1, { a: 90, off: 1, n: 2, gap: 1 });
       drop(B(8), [0.3, 0.15], 0, '..o.o.H---', { a: 200, turn: 60 });
-      drop(B(9, 2), [-0.35, -0.1], 2, '..o.o.', { a: 0, turn: 50 });
+      pulse(B(9, 2), [-0.35, -0.1], 2, { a: 0, off: 1, n: 3, gap: 0.5 });
       drop(B(10), [0.25, -0.2], 3, '..o.o.oo', { a: 180, turn: 50 });
       skip(B(11, 1), [-0.55, 0.3], [0.1, 0.1], 2, 'o.o.o.');
       // CHORUS: a new drop every bar from a new place; a skipping stone closes each half
@@ -46,11 +47,13 @@
       skip(B(19, 1), [-0.6, -0.3], [0.2, 0.2], 1, 'o.o.oo');
       // BREAK: slow rings from the centre; ride them outward, and round
       drop(B(20), [0, 0], 3, '..H---..S---', { a: -90, turn: 135, speed: 0.08, spin: 90 });
-      drop(B(22), [0.1, 0.05], 1, '..o.o.o.H---', { a: 30, turn: 100, speed: 0.08 });
-      // CHORUS II: one side calls, the other answers as soon as it lands
-      [[24, -0.4, -0.15, 0.4, 0.15], [26, 0.4, -0.15, -0.4, 0.15]].forEach(([b, x1, y1, x2, y2], k) => {
-        drop(B(b), [x1, y1], (k * 2) % 4, '..o.o.o.', { a: -60, turn: 30 });
-        drop(B(b, 3), [x2, y2], (k * 2 + 1) % 4, '..o.o.oo', { a: 120, turn: 30 });
+      // a raindrop running down the glass, its ring sliding with it
+      drop(B(22), [0.15, -0.25], 1, '..o.o.o.H---', { a: 30, turn: 100, speed: 0.08, path: [[7, 0.15, 0.22]], ease: 'linear' });
+      // CHORUS II: two raindrops fall together; one sings, then the other, and where their rings meet, both keys at once
+      [[24, -0.12], [25, 0.12], [26, -0.05], [27, 0.1]].forEach(([b, y], k) => {
+        const A = drop(B(b), [-0.35, y], (k * 2) % 4, '..o.oo', { a: 0, turn: y < 0 ? 40 : -40 });
+        const Bd = drop(B(b), [0.35, y], (k * 2 + 1) % 4, '......o', { a: 180, turn: 0 });
+        cross(B(b, 4), A, Bd);
       });
       drop(B(28), [0, -0.1], 2, '..o.oo..', { a: 90, turn: 50 });
       skip(B(29, 1), [-0.6, 0.3], [0.5, -0.2], 0, 'o.o.oo');
@@ -161,8 +164,21 @@
           }
           g.globalCompositeOperation = 'source-over';
         },
-        // raindrops landing everywhere: small rings that fade
+        // raindrops landing everywhere: small rings that fade; drips from the eaves fall onto their spot
         surface(c) {
+          for (const d of f.DROPS) {
+            if (d.rings < 2) continue;
+            if (d.beat > c.beat + 2) break;
+            for (let k = 0; k < d.rings; k++) {
+              const u = (d.beat + k * d.gap - c.beat) / 0.6;
+              if (u < 0 || u > 1) continue;
+              const [x, y] = f.toScreen(d.x, d.y), h = u * f.F.u * 0.35;
+              g.fillStyle = rgba(RAINC, 0.8 * (1 - u * 0.5));
+              g.beginPath(); g.ellipse(x, y - h, 2.5, 4.5, 0, 0, TAU); g.fill();
+              g.strokeStyle = rgba(RAINC, 0.25); g.lineWidth = 1;
+              g.beginPath(); g.moveTo(x, y - h - 4); g.lineTo(x, y - h - 18); g.stroke();
+            }
+          }
           if (kit.reduceMotion) return;
           const rate = RATE[c.sec.name] || 6;
           const k1 = Math.floor(c.now * rate), k0 = Math.floor((c.now - 1.2) * rate);

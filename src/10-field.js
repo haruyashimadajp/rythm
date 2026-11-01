@@ -356,8 +356,24 @@
         gl.addColorStop(0, rgba(col, 0.45 * a)); gl.addColorStop(1, rgba(col, 0));
         g.fillStyle = gl; g.fillRect(sx - r, sy - r, r * 2, r * 2);
       }
+      // The rings that still have notes to strike are the lines to watch: they are drawn bold and bright,
+      // and every other line (echoes, rings already done, sonar sweeps, stone splashes) stays faint.
+      const live = new Map();
+      function findLive(now) {
+        live.clear();
+        const mark = (d, k) => { if (!live.has(d)) live.set(d, new Set()); live.get(d).add(k); };
+        for (let i = S.cursor; i < S.notes.length; i++) {
+          const n = S.notes[i];
+          if (n.t - now > VIEW + 2) break;
+          if (n.head && n.holding === null) continue;
+          if (n.skip) continue; // a stone's note sits on its landing spot, not on a ring
+          mark(n.drop, n.ring || 0);
+          if (n.cross) mark(n.cross, 0);
+        }
+      }
       function drawRipples(now) {
         field.rings.length = 0;
+        findLive(now);
         const view = Math.hypot(W, H) / F.u;
         for (const d of DROPS) {
           const lead = d.t - now;
@@ -400,19 +416,26 @@
             if (R <= 0 || R > reach) continue;
             any = true;
             const appear = d.speed < 0 || d.r0 > 0 ? Math.min(1, ok / 0.4) : 1;
-            for (let e = 0; e < 3; e++) {
-              // echoes: where the ring (and a moving centre) was a moment ago
+            const judging = live.has(d) && live.get(d).has(k);
+            for (let e = 2; e >= 1; e--) {
+              // echoes: where the ring (and a moving centre) was a moment ago; always faint
               const oe = ok - e * 0.3;
               if (oe < 0) continue;
               const Re = ringR(d, oe);
               if (Re <= 0) continue;
               const [ex, ey] = ringC(d, off - e * 0.3);
-              drawRing(d, ex, ey, Re, (e === 0 ? 0.75 : 0.22 / e) * fade * appear * (d.small ? 0.7 : 1), e === 0 ? (inside ? 2.5 : 4) : 1.5);
+              drawRing(d, ex, ey, Re, (0.12 / e) * fade * appear, 1);
             }
-            if (!inside) {
+            if (!inside && judging) {
               // a giant ring from off screen trails a soft wake
-              for (let e = 1; e <= 5; e++) { g.strokeStyle = rgba(col, 0.06 * fade * appear); g.lineWidth = 7; field.ringPath(cx, cy, R - e * 0.025 * Math.sign(d.speed || 1)); g.stroke(); }
+              for (let e = 1; e <= 4; e++) { g.strokeStyle = rgba(col, 0.04 * fade * appear); g.lineWidth = 6; field.ringPath(cx, cy, R - e * 0.025 * Math.sign(d.speed || 1)); g.stroke(); }
             }
+            if (judging) {
+              // the line to watch: a soft glow under a bold, bright ring
+              g.strokeStyle = rgba(col, 0.18 * appear); g.lineWidth = 9;
+              field.ringPath(cx, cy, R); g.stroke();
+              drawRing(d, cx, cy, R, 0.95 * appear, 3.5);
+            } else drawRing(d, cx, cy, R, 0.26 * fade * appear * (d.small ? 0.7 : 1), 1.3);
             field.rings.push({ x: cx, y: cy, R, hue: d.hue, d });
           }
           if (!inside || !any) continue;
