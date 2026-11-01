@@ -103,6 +103,10 @@
 
   @media (min-width: 900px) {
     .panel-wrap { align-items: center; padding-left: max(48px, env(safe-area-inset-left, 0px)); }
+    /* keep the whole song list on one screen */
+    #menuWrap .panel { gap: 12px; }
+    .songs { gap: 6px; }
+    .song-card { padding: 7px 12px; }
   }
   @media (max-height: 700px) and (max-width: 899px) {
     #titleWrap .lede, #titleWrap .how, #menuWrap .lede { display: none; }
@@ -140,6 +144,7 @@
       <li><b>スマホ</b><span>ノーツを直接タップ</span></li>
       <li><b>長押し</b><span>波紋と一緒に動く光を、押したまま追いかける</span></li>
       <li><b>水切り</b><span>跳ねてくる石が着水する点を叩く</span></li>
+      <li><b>交点</b><span>二つの波紋が交わる点。<kbd>Z</kbd> <kbd>X</kbd> を同時に（クリックとキーでも）、スマホは二本指で同時にタップ</span></li>
     </ul>
     <div class="settings">
       <div class="row">
@@ -266,6 +271,7 @@
   }
 
   // ===== Judging =====
+  const DOUBLE = 0.12; // how close together the two presses of a crossing note must be
   const gradeOf = (adt) => (adt <= WIN.perfect ? 'perfect' : adt <= WIN.great ? 'great' : 'good');
 
   function newRun(auto, attract) {
@@ -296,6 +302,14 @@
       if (n.head || !M.hitTest(n, p.x, p.y)) continue;
       const dt = now - n.t;
       if (Math.abs(dt) > WIN.good) continue;
+      if (n.need === 2) {
+        // a crossing note takes two presses together (two keys, a key and a click, or two fingers)
+        if (n.pressTok === undefined || n.pressTok === token || now - n.pressAt > DOUBLE) { n.pressTok = token; n.pressAt = now; return true; }
+        n.head = gradeOf(Math.max(Math.abs(dt), Math.abs(n.pressAt - n.t)));
+        judge(n, n.head, now);
+        if (!S.attract && !S.auto) audio.tick();
+        return true;
+      }
       n.head = gradeOf(Math.abs(dt));
       judge(n, n.head, now);
       if (!S.attract && !S.auto) audio.tick();
@@ -324,6 +338,8 @@
         n.head = 'perfect'; judge(n, 'perfect', now);
         if (n.dur > 0) n.holding = 'auto';
       }
+      // only one press reached a crossing note: it counts, but only as GOOD
+      if (n.need === 2 && !n.head && n.pressTok !== undefined && now - n.pressAt > DOUBLE) { n.head = 'good'; judge(n, 'good', now); }
       if (!n.head && now - n.t > WIN.good) {
         n.head = 'miss'; judge(n, 'miss', now);
         if (n.dur > 0) { n.tail = 'miss'; judge(n, 'miss', now); }
@@ -347,10 +363,11 @@
   // ===== Audio =====
   // A shared synth kit; each song adds its own voices and arrangement (see song.song).
   const audio = (() => {
-    let ac = null, master = null, noise = null, reverbIn = null, out = null, bus = null, padV = 0.85;
+    let ac = null, master = null, noise = null, reverbIn = null, out = null, bus = null, padV = 0.85, clipSrc = null;
     const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
 
     function init() {
+      if (ac) return;
       ac = new (window.AudioContext || window.webkitAudioContext)();
       const comp = ac.createDynamicsCompressor();
       comp.threshold.value = -14; comp.ratio.value = 4; comp.attack.value = 0.004; comp.release.value = 0.2;
@@ -474,7 +491,7 @@
           o.connect(f);
         }
       },
-      lead(at, midi, dur) { M.song.lead(A, at, midi, dur); },
+      lead(at, midi, dur) { if (M.song.lead) M.song.lead(A, at, midi, dur); },
     };
 
     // Arrangement -> time-sorted events (song seconds).
@@ -487,9 +504,22 @@
         M.song.arrange(add, bar, b0, ch, name);
       }
       if (M.song.extra) M.song.extra(add);
-      for (const n of M.chart) { const m = M.song.leadMidi(n); if (m != null) add(n.beat, 'lead', m, n.dur); }
+      if (M.song.leadMidi) for (const n of M.chart) { const m = M.song.leadMidi(n); if (m != null) add(n.beat, 'lead', m, n.dur); }
       ev.sort((a, b) => a.t - b.t);
       return ev;
+    }
+
+    // Songs recorded as audio files: fetched and decoded once (an AudioContext may decode before any gesture).
+    const clips = new Map();
+    function loadClip(m) {
+      if (!m.audioFile) return Promise.resolve(null);
+      if (!clips.has(m.id)) {
+        init();
+        clips.set(m.id, fetch(m.audioFile.src).then((r) => { if (!r.ok) throw new Error(`${r.status}`); return r.arrayBuffer(); })
+          .then((b) => new Promise((ok, no) => ac.decodeAudioData(b, ok, no)))
+          .catch((e) => { clips.delete(m.id); throw e; }));
+      }
+      return clips.get(m.id);
     }
 
     let song = [], idx = 0, start = 0, running = false;
@@ -522,19 +552,29 @@
     }
 
     return {
+      loadClip,
       async start() {
-        if (!ac) init();
+        init();
         if (ac.state !== 'running') await ac.resume();
+        const clip = await loadClip(M);
         lastSong = -Infinity;
         newRun(M.song);
         song = buildSong(); idx = 0;
         start = ac.currentTime + 2.2;
         running = true;
+        if (clip) {
+          // the file's beat 0 sits t0 seconds in, so it starts that much before the song clock's zero
+          clipSrc = ac.createBufferSource(); clipSrc.buffer = clip;
+          const g = ac.createGain(); g.gain.value = M.audioFile.gain ?? 0.9;
+          clipSrc.connect(g).connect(out);
+          clipSrc.start(start - M.audioFile.t0);
+        }
         if (M.onAudioStart) M.onAudioStart(A, start);
         pump();
       },
       halt() {
         running = false;
+        if (clipSrc) { try { clipSrc.stop(ac.currentTime + 0.1); } catch (e) { /* not started */ } clipSrc = null; }
         if (out) out.gain.setTargetAtTime(0, ac.currentTime, 0.05);
         for (const m of SONGS) if (m.onAudioStop) m.onAudioStop();
       },
@@ -620,9 +660,20 @@
     menuWrap.hidden = true; titleWrap.hidden = false; resultWrap.hidden = true;
     setHash(M.id);
     $('#startBtn').focus({ preventScroll: true });
+    // start fetching a recorded song while the player reads the title
+    audio.loadClip(M).catch(() => {});
   }
 
   async function startGame() {
+    if (M.audioFile) {
+      const btn = $('#startBtn'), label = btn.textContent;
+      btn.textContent = '読み込み中…'; btn.disabled = true;
+      try { await audio.loadClip(M); } catch (e) {
+        $('#songBest').textContent = '音源を読み込めませんでした。ページをウェブサーバー経由で開いてください。';
+        btn.textContent = label; btn.disabled = false; return;
+      }
+      btn.textContent = label; btn.disabled = false;
+    }
     menuWrap.hidden = true; titleWrap.hidden = true; resultWrap.hidden = true;
     S.screen = 'play';
     M.layout(W, H, false);
@@ -697,7 +748,7 @@
       const no = document.createElement('span'); no.className = 'sc-no'; no.textContent = String(m.no).padStart(2, '0');
       const title = document.createElement('span'); title.className = 'sc-title'; title.textContent = m.title;
       const jp = document.createElement('small'); jp.textContent = m.jp; title.appendChild(jp);
-      const genre = document.createElement('span'); genre.className = 'sc-genre'; genre.textContent = `${m.genre} ・ BPM ${m.bpm}`;
+      const genre = document.createElement('span'); genre.className = 'sc-genre'; genre.textContent = `${m.genre} ・ BPM ${m.bpm}${m.audioFile ? ' ・ 録音' : ''}`;
       const side = document.createElement('span'); side.className = 'sc-side';
       const bl = document.createElement('span'); bl.className = 'sc-best'; bl.textContent = bestLabel(best[m.id]);
       side.append(levelMeter(m.level), bl);
@@ -831,11 +882,25 @@
   //    bpm, beatsPerBar, bars, sections [{ bar, name, hue }], chords,
   //    speed (ripple growth, field units per beat), ring { sides, rot }
   //    (0 sides = circles), attractFromBar,
-  //    chart({ drop, skip, B }) to place the notes (see drop / skip below),
-  //    song: the music (see the engine's audio; leadMidi defaults to the
-  //    chord's lead tones), kickOn(bar, section) for the beat pulse,
-  //    scene(kit, field): { back, surface, front, hit, reset } drawing hooks.
+  //    chart({ drop, skip, wave, pulse, cross, tip, B }) to place the notes
+  //    (see below), song: the music (see the engine's audio; leadMidi
+  //    defaults to the chord's lead tones), or audioFile { src, t0 } for a
+  //    recorded song whose beat 0 is t0 seconds in; kickOn(bar, section) or
+  //    pulse(beat) for the beat pulse; ring.chroma for prism fringes;
+  //    scene(kit, field): { back, surface, front, post, ring, hit, reset,
+  //    layout } drawing hooks.
   // =====================================================================
+
+  // A beat pulse from a list of kick beats (for songs played from a recording).
+  function kickPulse(kicks) {
+    const K = [...kicks].sort((a, b) => a - b);
+    return (beat) => {
+      let lo = 0, hi = K.length - 1, k = -1;
+      while (lo <= hi) { const m = (lo + hi) >> 1; if (K[m] <= beat) { k = m; lo = m + 1; } else hi = m - 1; }
+      return k < 0 ? 0 : Math.exp(-(beat - K[k]) * 5);
+    };
+  }
+
   function rippleSong(def) {
     defineSong((kit) => {
       const { g, rgba, hex, S, TAU, DEG } = kit;
@@ -854,51 +919,123 @@
         return Math.cos(Math.PI / SIDES) / Math.cos(x - Math.PI / SIDES);
       };
 
+      // ----- ripples -----
+      // A drop's ring, `off` beats after it lands, has radius r0 + speed*off + accel*off²/2
+      // (a negative speed makes a ring that closes in) around a centre that stays put, or moves
+      // through the keyframes of opts.path. A pulse train sends `rings` rings, `gap` beats apart.
+      const ringR = (d, off) => d.r0 + d.speed * off + 0.5 * d.accel * off * off;
+      function ringC(d, off) {
+        const P = d.path;
+        if (!P) return [d.x, d.y];
+        if (off <= 0) return [P[0][1], P[0][2]];
+        for (let k = 1; k < P.length; k++) {
+          if (off > P[k][0]) continue;
+          const a = P[k - 1], b = P[k];
+          if (d.ease === 'step') return [a[1], a[2]];
+          let u = (off - a[0]) / Math.max(1e-6, b[0] - a[0]);
+          if (d.ease !== 'linear') u = u * u * (3 - 2 * u);
+          return [a[1] + (b[1] - a[1]) * u, a[2] + (b[2] - a[2]) * u];
+        }
+        const z = P[P.length - 1];
+        return [z[1], z[2]];
+      }
+      // the point of ring `ring` of drop d along angle a, `off` beats after landing
+      function ringPoint(d, off, a, ring = 0) {
+        const [cx, cy] = ringC(d, off), r = ringR(d, off - ring * d.gap) * shape(a);
+        return [cx + Math.cos(a) * r, cy + Math.sin(a) * r];
+      }
+
       // ----- chart: drops (ripple sources) and the notes their ripple reaches -----
       // Positions are in field units: the field is about ±0.8 wide and ±0.48 tall around its centre.
       const BOUND_X = 0.74, BOUND_Y = 0.42;
       const inField = (x, y) => Math.abs(x) <= BOUND_X + 1e-6 && Math.abs(y) <= BOUND_Y + 1e-6;
+      const onScreen = (x, y) => Math.abs(x) < 0.95 && Math.abs(y) < 0.62;
       const DROPS = [];
-      // drop(beat, [x, y], hue, pattern, opts): a drop lands at `beat` and its ripple spreads at `speed`.
-      // Pattern steps are 8th notes (opts.step changes that): 'o' tap, 'H' hold that rides the ripple outward,
+      let jackId = 0;
+      function newDrop(beat, x, y, hue, o) {
+        const d = {
+          beat, x, y, hue, notes: [],
+          speed: o.speed ?? def.speed ?? 0.11, r0: o.r0 ?? 0, accel: o.accel ?? 0, rings: o.rings ?? 1, gap: o.gap ?? 1,
+          dark: !!o.dark, reveal: !!o.reveal,
+        };
+        if (o.path) { d.path = [[0, x, y], ...o.path]; d.ease = o.ease || 'smooth'; }
+        DROPS.push(d);
+        return d;
+      }
+      // drop(beat, [x, y], hue, pattern, opts): a drop lands at `beat` and its ripple spreads.
+      // Pattern steps are 8th notes (opts.step changes that): 'o' tap, 'H' hold that rides the ripple,
       // 'S' hold that also circles round the drop by opts.spin degrees, '-' continues a hold, '.' rests.
       // The first note sits at angle opts.a; each next one turns about opts.turn degrees per beat
       // around the drop (scaled so that notes far out do not fly apart); a note that would leave the
-      // field turns the least it must, either way, to fit.
+      // field turns the least it must, either way, to fit. opts.angs gives every note's angle instead.
+      // Ring options: speed, r0, accel, path [[beat, x, y]...] + ease ('smooth' | 'linear' | 'step'),
+      // dark (notes hidden until a reveal ring passes them).
       function drop(beat, [x, y], hue, pattern, o = {}) {
-        const speed = o.speed ?? def.speed ?? 0.11, step = o.step ?? 0.5, turn = o.turn ?? 70, spin = (o.spin ?? 120) * DEG;
-        const d = { beat, x, y, hue, speed, notes: [] };
+        const step = o.step ?? 0.5, turn = o.turn ?? 70, spin = (o.spin ?? 120) * DEG;
+        const d = newDrop(beat, x, y, hue, o);
         const seq = pattern.replace(/[|\s]/g, '');
-        let ang = (o.a ?? -90) * DEG, prevOff = null, prev = null;
+        let ang = (o.a ?? -90) * DEG, prevOff = null, prev = null, ni = 0;
         for (let i = 0; i < seq.length; i++) {
           const c = seq[i];
           if (c !== 'o' && c !== 'H' && c !== 'S') continue;
           let len = 0;
           if (c !== 'o') { let j = i + 1; while (j < seq.length && seq[j] === '-') j++; len = j - i; }
           const off = i * step, offEnd = (i + len) * step, sp = c === 'S' ? spin : 0;
-          const R0 = speed * off, R1 = speed * offEnd;
+          const at = (a, u) => ringPoint(d, off + (offEnd - off) * u, a + sp * u);
+          if (ringR(d, off) <= 0 || ringR(d, offEnd) <= 0) console.warn(`${def.id}: drop at beat ${beat}: note ${off} comes after its ring has closed`);
           const fits = (a) => {
             // keep clear of the note before, so two notes never sit on top of each other
-            if (prev && Math.hypot(x + Math.cos(a) * R0 * shape(a) - prev[0], y + Math.sin(a) * R0 * shape(a) - prev[1]) < 0.1) return false;
-            for (let k = 0; k <= 8; k++) {
-              const u = k / 8, aa = a + sp * u, r = (R0 + (R1 - R0) * u) * shape(aa);
-              if (!inField(x + Math.cos(aa) * r, y + Math.sin(aa) * r)) return false;
-            }
+            if (prev) { const [px, py] = at(a, 0); if (Math.hypot(px - prev[0], py - prev[1]) < 0.1) return false; }
+            for (let k = 0; k <= 8; k++) { const [px, py] = at(a, k / 8); if (!inField(px, py)) return false; }
             return true;
           };
-          if (prevOff !== null) ang += turn * DEG * (off - prevOff) * (0.3 / Math.max(R0, 0.15));
-          let a = ang;
-          for (let k = 1; k <= 24 && !fits(a); k++) a = ang + Math.ceil(k / 2) * (k % 2 ? 1 : -1) * 15 * DEG;
-          if (!fits(a)) console.warn(`${def.id}: drop at beat ${beat}: note ${off} does not fit`);
-          if (R1 > 0.62) console.warn(`${def.id}: drop at beat ${beat}: note ${off} is ${R1.toFixed(2)} out; split the drop`);
-          d.notes.push({ off, offEnd, ang: a, spin: sp, R0, R1 });
-          const ae = a + sp;
-          prev = [x + Math.cos(ae) * R1 * shape(ae), y + Math.sin(ae) * R1 * shape(ae)];
-          ang = ae;
+          let a;
+          if (o.angs) {
+            a = o.angs[ni] * DEG;
+            if (!fits(a)) console.warn(`${def.id}: drop at beat ${beat}: note ${off} at angle ${o.angs[ni]} does not fit`);
+          } else {
+            if (prevOff !== null) ang += turn * DEG * (off - prevOff) * (0.3 / Math.max(Math.abs(ringR(d, off)), 0.15));
+            a = ang;
+            for (let k = 1; k <= 24 && !fits(a); k++) a = ang + Math.ceil(k / 2) * (k % 2 ? 1 : -1) * 15 * DEG;
+            if (!fits(a)) console.warn(`${def.id}: drop at beat ${beat}: note ${off} does not fit`);
+          }
+          if (!d.path && inField(x, y) && d.speed > 0 && ringR(d, offEnd) > 0.62) console.warn(`${def.id}: drop at beat ${beat}: note ${off} is ${ringR(d, offEnd).toFixed(2)} out; split the drop`);
+          d.notes.push({ off, offEnd, ang: a, spin: sp });
+          prev = at(a, 1);
+          ang = a + sp;
           prevOff = offEnd;
+          ni++;
         }
-        DROPS.push(d);
         return d;
+      }
+      // wave(beat, [x, y], hue, opts): a ring with no notes of its own (a sonar sweep, a shock wave);
+      // with opts.reveal it uncovers dark notes as it passes them.
+      const wave = (beat, p, hue, o = {}) => drop(beat, p, hue, '', o);
+      // pulse(beat, [x, y], hue, opts): a pulse train of opts.n rings, opts.gap beats apart, that strike
+      // one spot (angle opts.a) again and again; the first ring reaches it at opts.off beats.
+      function pulse(beat, [x, y], hue, o = {}) {
+        const n = o.n ?? 3, gap = o.gap ?? 0.5, off = o.off ?? 1, a = (o.a ?? -90) * DEG;
+        const d = newDrop(beat, x, y, hue, { ...o, rings: n, gap });
+        const id = ++jackId;
+        for (let k = 0; k < n; k++) d.notes.push({ off: off + k * gap, offEnd: off + k * gap, ang: a, spin: 0, ring: k, jack: { id, k, n } });
+        const [px, py] = ringPoint(d, off, a);
+        if (!inField(px, py)) console.warn(`${def.id}: pulse at beat ${beat} strikes outside the field`);
+        return d;
+      }
+      // cross(beat, dropA, dropB, opts): a note where the two rings cross at `beat`; it takes two
+      // presses at once. opts.side (0 or 1) picks which of the two crossings; by default the one in the field.
+      function cross(beat, A, B, o = {}) {
+        const oa = beat - A.beat, ob = beat - B.beat;
+        const [ax, ay] = ringC(A, oa), [bx, by] = ringC(B, ob), ra = ringR(A, oa), rb = ringR(B, ob);
+        const dx = bx - ax, dy = by - ay, dd = Math.hypot(dx, dy);
+        if (SIDES || !dd || dd > ra + rb || dd < Math.abs(ra - rb)) { console.warn(`${def.id}: rings do not cross at beat ${beat}`); return null; }
+        const l = (ra * ra - rb * rb + dd * dd) / (2 * dd), h = Math.sqrt(Math.max(0, ra * ra - l * l));
+        const mx = ax + (dx * l) / dd, my = ay + (dy * l) / dd;
+        const P = [[mx - (dy * h) / dd, my + (dx * h) / dd], [mx + (dy * h) / dd, my - (dx * h) / dd]];
+        const p = o.side !== undefined ? P[o.side] : (inField(...P[0]) && (!inField(...P[1]) || Math.hypot(...P[0]) < Math.hypot(...P[1])) ? P[0] : P[1]);
+        if (!inField(...p)) console.warn(`${def.id}: crossing at beat ${beat} is outside the field`);
+        A.notes.push({ off: oa, offEnd: oa, ang: Math.atan2(p[1] - ay, p[0] - ax), spin: 0, need: 2, cross: B });
+        return p;
       }
       // skip(beat, from, to, hue, pattern): a stone skips across the water from `from` towards `to`,
       // landing on each 'o' (8th steps, or opts.step); each landing is a note on the spot it lands.
@@ -920,13 +1057,16 @@
           // the first skip comes in from outside along the same line
           const lead = sum ? (gaps[0] / sum) * 1.3 : 0.25;
           const from = prev || { x: x - (x1 - x0) * lead, y: y - (y1 - y0) * lead, beat: beat + off - Math.max(1, step * 2) };
-          const d = { beat: beat + off, x, y, hue, speed: 0.08, small: true, stone: from, notes: [{ off: 0, offEnd: 0, ang: 0, spin: 0, R0: 0, R1: 0, skip: true }] };
-          DROPS.push(d);
+          const d = newDrop(beat + off, x, y, hue, { speed: 0.08, dark: o.dark });
+          d.small = true; d.stone = from;
+          d.notes.push({ off: 0, offEnd: 0, ang: 0, spin: 0, skip: true });
           prev = { x, y, beat: beat + off };
         });
       }
       const B = (bar, beat = 0) => bar * BPB + beat;
-      def.chart({ drop, skip, B });
+      // where note i of drop d sits, and when: for chaining a new drop onto a note
+      const tip = (d, i) => { const n = d.notes[i < 0 ? d.notes.length + i : i]; return { beat: d.beat + n.offEnd, p: ringPoint(d, n.offEnd, n.ang + n.spin, n.ring || 0) }; };
+      def.chart({ drop, skip, wave, pulse, cross, tip, B });
 
       const CHART = [];
       for (const d of DROPS) {
@@ -934,28 +1074,48 @@
         if (d.stone) d.stone.t = d.stone.beat * SPB;
         d.notes.forEach((n, i) => {
           const beat = d.beat + n.off;
-          CHART.push({ beat, t: beat * SPB, dur: (n.offEnd - n.off) * SPB, drop: d, ang: n.ang, spin: n.spin, R0: n.R0, R1: n.R1, idx: i, skip: !!n.skip });
+          CHART.push({ beat, t: beat * SPB, dur: (n.offEnd - n.off) * SPB, drop: d, ang: n.ang, spin: n.spin, ring: n.ring || 0, idx: i, skip: !!n.skip, need: n.need, cross: n.cross, jack: n.jack, dark: d.dark });
         });
         d.last = d.t + Math.max(0, ...d.notes.map((n) => n.offEnd)) * SPB;
+        // a ring that closes in vanishes at its centre
+        if (d.speed < 0) { let off = 0; while (ringR(d, off) > 0 && off < 64) off += 0.02; d.closeT = d.t + off * SPB; }
       }
       DROPS.sort((a, b) => a.t - b.t);
       kit.sortChart(CHART);
 
       // where a note sits (field units), or for a hold, where the ripple front is along it at time t
       function fieldPos(n, t) {
-        const u = n.dur > 0 ? Math.min(1, Math.max(0, (t - n.t) / n.dur)) : 0;
-        const a = n.ang + n.spin * u, r = (n.R0 + (n.R1 - n.R0) * u) * shape(a);
-        return [n.drop.x + Math.cos(a) * r, n.drop.y + Math.sin(a) * r];
+        const tt = n.dur > 0 ? Math.min(n.t + n.dur, Math.max(n.t, t)) : n.t, u = n.dur > 0 ? (tt - n.t) / n.dur : 0;
+        return ringPoint(n.drop, (tt - n.drop.t) / SPB, n.ang + n.spin * u, n.ring);
+      }
+      // dark notes show themselves when the last reveal ring before them sweeps past (at least a beat ahead)
+      const REVEALERS = DROPS.filter((d) => d.reveal);
+      for (const c of CHART) {
+        if (!c.dark) continue;
+        const [px, py] = fieldPos(c, c.t);
+        let best = null;
+        for (const r of REVEALERS) {
+          if (r.t >= c.t) continue;
+          for (let off = 0; off < 48; off += 0.04) {
+            const [cx, cy] = ringC(r, off);
+            if (ringR(r, off) < Math.hypot(px - cx, py - cy)) continue;
+            const t = r.t + off * SPB;
+            if (t <= c.t - SPB && (best === null || t > best)) best = t;
+            break;
+          }
+        }
+        c.revealT = best ?? c.t - 1.5 * SPB;
       }
       // chart checks: every note must be reachable from the one before, and no two may wait on one spot
       for (let i = 1; i < CHART.length; i++) {
         const a = CHART[i - 1], b = CHART[i];
         const gap = b.t - (a.t + a.dur), pa = fieldPos(a, a.t + a.dur), pb = fieldPos(b, b.t);
         const dist = Math.hypot(pb[0] - pa[0], pb[1] - pa[1]);
-        if (gap < 0.1 || dist / Math.max(gap, 0.01) > 2.2) console.warn(`${def.id}: beat ${b.beat}: ${gap.toFixed(2)} s after the last note but ${dist.toFixed(2)} away`);
+        if ((gap < 0.1 && !(a.jack && b.jack && a.jack.id === b.jack.id && gap > 0.05)) || dist / Math.max(gap, 0.01) > 2.2) console.warn(`${def.id}: beat ${b.beat}: ${gap.toFixed(2)} s after the last note but ${dist.toFixed(2)} away`);
       }
       for (let i = 0; i < CHART.length; i++) {
         for (let j = i + 1; j < CHART.length && CHART[j].t - CHART[i].t < 1.2; j++) {
+          if (CHART[i].jack && CHART[j].jack && CHART[i].jack.id === CHART[j].jack.id) continue;
           const a = fieldPos(CHART[i], CHART[i].t), b = fieldPos(CHART[j], CHART[j].t);
           if (Math.hypot(a[0] - b[0], a[1] - b[1]) < 0.07) console.warn(`${def.id}: beats ${CHART[i].beat} and ${CHART[j].beat} share a spot`);
         }
@@ -985,7 +1145,8 @@
       }
       // what a song's scene gets to draw with
       const field = {
-        F, toScreen, noteR, HUES, INK, INK2, PAPER, MUTED, ACCENT, SPB, BPB, SECTIONS, DROPS, CHART, shape, burst,
+        F, toScreen, noteR, HUES, INK, INK2, PAPER, MUTED, ACCENT, SPB, BPB, SECTIONS, DROPS, CHART, shape, burst, ringC, ringR, onScreen,
+        rings: [], // the rings on the water this frame: { x, y, R, hue, d } in field units
         get W() { return W; }, get H() { return H; },
         shake(v) { if (!kit.reduceMotion) shakeV = Math.max(shakeV, v); },
         flash(v, col = PAPER) { flashV = Math.max(flashV, kit.reduceMotion ? v * 0.3 : v); flashCol = col; },
@@ -1048,35 +1209,96 @@
         g.fillStyle = glow; g.fillRect(0, 0, W, H);
       }
 
+      const CHROMA = !!(def.ring && def.ring.chroma), RED = [255, 70, 90], BLUE = [70, 130, 255];
+      function drawRing(d, x, y, R, alpha, width) {
+        if (scene.ring) { scene.ring(d, x, y, R, alpha, width); return; }
+        if (CHROMA) {
+          // light through a prism: red and blue fringes either side of the ring
+          g.globalCompositeOperation = 'lighter';
+          for (const [c, dr] of [[RED, -2.2], [BLUE, 2.2]]) { g.strokeStyle = rgba(c, alpha * 0.55); g.lineWidth = width * 0.8; field.ringPath(x, y, R + dr / F.u); g.stroke(); }
+          g.globalCompositeOperation = 'source-over';
+        }
+        g.strokeStyle = rgba(HUES[d.hue], alpha); g.lineWidth = width;
+        field.ringPath(x, y, R); g.stroke();
+      }
+      // a glow on the screen edge facing a centre that lies off screen
+      function edgeGlow(x, y, col, a) {
+        let [sx, sy] = toScreen(x, y);
+        sx = Math.min(W, Math.max(0, sx)); sy = Math.min(H, Math.max(0, sy));
+        const r = F.u * 0.45, gl = g.createRadialGradient(sx, sy, 0, sx, sy, r);
+        gl.addColorStop(0, rgba(col, 0.45 * a)); gl.addColorStop(1, rgba(col, 0));
+        g.fillStyle = gl; g.fillRect(sx - r, sy - r, r * 2, r * 2);
+      }
       function drawRipples(now) {
-        const maxR = Math.hypot(W, H) / F.u;
+        field.rings.length = 0;
+        const view = Math.hypot(W, H) / F.u;
         for (const d of DROPS) {
           const lead = d.t - now;
           if (lead > 0.8) break;
-          const col = HUES[d.hue], [sx, sy] = toScreen(d.x, d.y);
+          const col = HUES[d.hue], off = (now - d.t) / SPB;
+          const [cx, cy] = ringC(d, Math.max(0, off)), inside = onScreen(cx, cy);
           if (lead > 0) {
             if (d.stone) continue; // a skipping stone shows itself in flight (drawStones)
-            // the drop falling: a ring closing onto the spot
             const k = lead / 0.8;
+            if (d.path) {
+              // where a moving source will travel: a dotted line through its keyframes
+              g.setLineDash([3, 8]); g.strokeStyle = rgba(col, 0.4 * (1 - k)); g.lineWidth = 1.5;
+              g.beginPath(); d.path.forEach(([, px, py], q) => { const [sx, sy] = toScreen(px, py); if (q) g.lineTo(sx, sy); else g.moveTo(sx, sy); }); g.stroke();
+              g.setLineDash([]);
+            }
+            if (!inside) { edgeGlow(cx, cy, col, 1 - k); continue; }
+            const [sx, sy] = toScreen(cx, cy);
+            if (d.speed < 0) {
+              // a ring that will close in: its outline gathers first
+              g.setLineDash([4, 6]); g.strokeStyle = rgba(col, 0.5 * (1 - k)); g.lineWidth = 1.5;
+              field.ringPath(cx, cy, d.r0); g.stroke(); g.setLineDash([]);
+              continue;
+            }
+            // the drop falling: a ring closing onto the spot
             g.strokeStyle = rgba(col, 0.6 * (1 - k)); g.lineWidth = 2;
             g.beginPath(); g.arc(sx, sy, 6 + k * F.u * 0.12, 0, TAU); g.stroke();
             g.fillStyle = rgba(col, 0.8 * (1 - k));
             g.beginPath(); g.arc(sx, sy, 3 + 3 * (1 - k), 0, TAU); g.fill();
             continue;
           }
-          const R = ((now - d.t) / SPB) * d.speed;
-          const life = d.small ? 1.1 : 1.6;
-          const fade = now < d.last ? 1 : Math.max(0, 1 - (now - d.last) / life);
-          if (fade <= 0 || R > maxR) continue;
-          for (let k = 0; k < 3; k++) {
-            const rr = R - k * 0.035;
-            if (rr <= 0) continue;
-            g.strokeStyle = rgba(col, (k === 0 ? 0.75 : 0.22 / k) * fade * (d.small ? 0.7 : 1));
-            g.lineWidth = k === 0 ? 2.5 : 1.5;
-            field.ringPath(d.x, d.y, rr); g.stroke();
+          const fade = !d.notes.length || now < d.last ? 1 : Math.max(0, 1 - (now - d.last) / (d.small ? 1.1 : 1.6));
+          if (fade <= 0) continue;
+          if (!inside && off < 1.5) edgeGlow(cx, cy, col, 1 - off / 1.5);
+          const reach = Math.hypot(cx, cy) + view;
+          let any = false;
+          for (let k = 0; k < d.rings; k++) {
+            const ok = off - k * d.gap;
+            if (ok < 0) continue;
+            const R = ringR(d, ok);
+            if (R <= 0 || R > reach) continue;
+            any = true;
+            const appear = d.speed < 0 || d.r0 > 0 ? Math.min(1, ok / 0.4) : 1;
+            for (let e = 0; e < 3; e++) {
+              // echoes: where the ring (and a moving centre) was a moment ago
+              const oe = ok - e * 0.3;
+              if (oe < 0) continue;
+              const Re = ringR(d, oe);
+              if (Re <= 0) continue;
+              const [ex, ey] = ringC(d, off - e * 0.3);
+              drawRing(d, ex, ey, Re, (e === 0 ? 0.75 : 0.22 / e) * fade * appear * (d.small ? 0.7 : 1), e === 0 ? (inside ? 2.5 : 4) : 1.5);
+            }
+            if (!inside) {
+              // a giant ring from off screen trails a soft wake
+              for (let e = 1; e <= 5; e++) { g.strokeStyle = rgba(col, 0.06 * fade * appear); g.lineWidth = 7; field.ringPath(cx, cy, R - e * 0.025 * Math.sign(d.speed || 1)); g.stroke(); }
+            }
+            field.rings.push({ x: cx, y: cy, R, hue: d.hue, d });
           }
-          g.fillStyle = rgba(col, 0.5 * fade);
-          g.beginPath(); g.arc(sx, sy, 3, 0, TAU); g.fill();
+          if (!inside || !any) continue;
+          const [sx, sy] = toScreen(cx, cy);
+          if (d.path) {
+            // a moving source glows as it travels
+            const gl = g.createRadialGradient(sx, sy, 0, sx, sy, noteR() * 1.4);
+            gl.addColorStop(0, rgba(PAPER, 0.8 * fade)); gl.addColorStop(0.3, rgba(col, 0.5 * fade)); gl.addColorStop(1, rgba(col, 0));
+            g.fillStyle = gl; g.fillRect(sx - noteR() * 1.4, sy - noteR() * 1.4, noteR() * 2.8, noteR() * 2.8);
+          } else {
+            g.fillStyle = rgba(col, 0.5 * fade);
+            g.beginPath(); g.arc(sx, sy, 3, 0, TAU); g.fill();
+          }
         }
       }
 
@@ -1104,12 +1326,21 @@
         const r = noteR();
         g.lineCap = 'round';
         let next = null;
-        for (let i = S.cursor; i < S.notes.length; i++) if (!S.notes[i].head) { next = S.notes[i]; break; }
+        const front = new Map(); // the first note still waiting in each pulse train
+        for (let i = S.cursor; i < S.notes.length; i++) {
+          const n = S.notes[i];
+          if (n.head) continue;
+          if (!next) next = n;
+          if (n.jack && !front.has(n.jack.id)) front.set(n.jack.id, n);
+          if (n.t - now > VIEW) break;
+        }
         for (let i = S.notes.length - 1; i >= S.cursor; i--) {
           const n = S.notes[i];
           if (n.t - now > VIEW || n.end < now - 0.05) continue;
+          if (n.jack && !n.head && front.get(n.jack.id) !== n) continue;
+          if (n.revealT !== undefined && now < n.revealT) continue;
           const col = HUES[n.drop.hue];
-          const appear = Math.min(1, (VIEW - (n.t - now)) / 0.3);
+          const appear = Math.min(1, (VIEW - (n.t - now)) / 0.3) * (n.revealT !== undefined ? Math.min(1, (now - n.revealT) / 0.15) : 1);
           if (n.dur > 0 && n.tail === null && n.head !== 'miss') {
             // hold: a channel along the path the ripple front will take; the light rides the front
             g.globalAlpha = appear;
@@ -1136,10 +1367,14 @@
           g.globalAlpha = appear;
           if (!n.skip) {
             // faint thread back to the drop that will reach it, so you know which ring to watch
-            const [sx, sy] = toScreen(n.drop.x, n.drop.y);
-            g.setLineDash([2, 7]);
-            g.strokeStyle = rgba(col, 0.22); g.lineWidth = 1.2;
-            g.beginPath(); g.moveTo(sx, sy); g.lineTo(x, y); g.stroke();
+            g.setLineDash([2, 7]); g.lineWidth = 1.2;
+            for (const d of n.cross ? [n.drop, n.cross] : [n.drop]) {
+              const [fx, fy] = ringC(d, Math.max(0, (now - d.t) / SPB));
+              if (!onScreen(fx, fy)) continue;
+              const [sx, sy] = toScreen(fx, fy);
+              g.strokeStyle = rgba(HUES[d.hue], 0.22);
+              g.beginPath(); g.moveTo(sx, sy); g.lineTo(x, y); g.stroke();
+            }
             g.setLineDash([]);
           }
           g.fillStyle = rgba(INK, 0.75);
@@ -1148,7 +1383,20 @@
           g.beginPath(); g.arc(x, y, r * k, 0, TAU); g.fill();
           g.strokeStyle = rgba(col, 1); g.lineWidth = 3;
           g.beginPath(); g.arc(x, y, r, 0, TAU); g.stroke();
-          if (n.skip) {
+          if (n.cross) {
+            // a crossing: the other ring's colour outside, and a star of white light
+            g.strokeStyle = rgba(HUES[n.cross.hue], 1); g.lineWidth = 3;
+            g.beginPath(); g.arc(x, y, r * 1.28, 0, TAU); g.stroke();
+            g.fillStyle = rgba(PAPER, 0.95);
+            g.beginPath();
+            for (let q = 0; q < 8; q++) { const a = (q * TAU) / 8, rr = q % 2 ? r * 0.16 : r * (0.5 + 0.2 * k); g.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr); }
+            g.fill();
+          } else if (n.jack) {
+            // a pulse train: how many rings are still to come
+            g.fillStyle = rgba(PAPER, 0.95); g.textAlign = 'center'; g.textBaseline = 'middle';
+            g.font = `${Math.round(r * 0.8)}px "Dela Gothic One", sans-serif`;
+            g.fillText(String(n.jack.n - n.jack.k), x, y + 1);
+          } else if (n.skip) {
             // a landing mark: four ticks around the ring
             g.lineWidth = 2;
             for (let q = 0; q < 4; q++) {
@@ -1163,7 +1411,7 @@
             g.lineTo(x + Math.cos(a + 2.4) * r * 0.4, y + Math.sin(a + 2.4) * r * 0.4); g.lineTo(x + Math.cos(a - 2.4) * r * 0.4, y + Math.sin(a - 2.4) * r * 0.4);
             g.fill();
           }
-          if (n.dur === 0 || n.skip) {
+          if ((n.dur === 0 || n.skip) && !n.cross && !n.jack) {
             g.fillStyle = rgba(PAPER, 0.9);
             g.beginPath(); g.arc(x, y, r * 0.18, 0, TAU); g.fill();
           }
@@ -1246,11 +1494,11 @@
         g.globalAlpha = 1;
       }
 
-      const leadMidi = def.song.leadMidi || ((n) => { const ch = CHORDS[Math.floor(n.beat / BPB) % CHORDS.length]; return ch.lead[n.idx % ch.lead.length]; });
+      const leadMidi = def.audioFile ? null : def.song.leadMidi || ((n) => { const ch = CHORDS[Math.floor(n.beat / BPB) % CHORDS.length]; return ch.lead[n.idx % ch.lead.length]; });
 
       return {
         id: def.id, title: def.title, jp: def.jp, genre: def.genre, level: def.level, lede: def.lede, hues: def.hues,
-        theme, attractFromBar: def.attractFromBar ?? 8, beatsPerBar: BPB,
+        theme, attractFromBar: def.attractFromBar ?? 8, beatsPerBar: BPB, audioFile: def.audioFile,
         bpm: BPM, bars: def.bars, sections: SECTIONS, chords: CHORDS, chart: CHART,
         hitTest(n, x, y) { const [nx, ny] = notePos(n, n.t); return Math.hypot(nx - x, ny - y) <= noteR() * 1.8; },
         followPos: notePos,
@@ -1282,12 +1530,19 @@
         draw(now, dt) {
           const beat = now / SPB, bar = Math.floor(beat / BPB), sec = secAt(beat);
           ctx.now = now; ctx.beat = beat; ctx.bar = bar; ctx.sec = sec; ctx.dt = dt;
-          ctx.pulse = kit.pulse(beat, def.kickOn ? def.kickOn(bar, sec.name) : true);
-          // drops landing this frame splash
+          ctx.pulse = def.pulse ? def.pulse(beat) : kit.pulse(beat, def.kickOn ? def.kickOn(bar, sec.name) : true);
           if (now - lastNow < 0.25) {
             for (const d of DROPS) {
-              if (d.t > now) break;
-              if (d.t > lastNow) { const [sx, sy] = toScreen(d.x, d.y); burst(sx, sy, HUES[d.hue], d.small ? 0.35 : 0.5, 0.6); }
+              if (d.t > now && !(d.closeT > lastNow)) { if (d.t > now + 64 * SPB) break; continue; }
+              // drops landing this frame splash; rings that close in burst at their centre
+              if (d.t > lastNow && d.t <= now && d.speed > 0 && onScreen(d.x, d.y)) { const [sx, sy] = toScreen(d.x, d.y); burst(sx, sy, HUES[d.hue], d.small ? 0.35 : 0.5, 0.6); }
+              if (d.closeT > lastNow && d.closeT <= now) { const [sx, sy] = toScreen(...ringC(d, (d.closeT - d.t) / SPB)); burst(sx, sy, HUES[d.hue], 0.8, 0.9); }
+            }
+            // dark notes found by a reveal ring flash once
+            for (let i = S.cursor; i < S.notes.length; i++) {
+              const n = S.notes[i];
+              if (n.t - now > 8) break;
+              if (n.revealT > lastNow && n.revealT <= now) { const [sx, sy] = notePos(n, n.t); rings.push({ x: sx, y: sy, col: HUES[n.drop.hue], life: 0, max: 0.4, size: 0.6 }); }
             }
           }
           lastNow = now;
@@ -1305,6 +1560,7 @@
           drawBanners(now, beat);
           if (kit.playing()) drawPopups(now);
           g.restore();
+          if (scene.post) scene.post(ctx);
           if (flashV > 0) { g.fillStyle = rgba(flashCol, Math.min(0.6, flashV)); g.fillRect(0, 0, W, H); }
         },
         onJudge(n, grade, now) {
@@ -2476,6 +2732,882 @@
         },
         hit(c, n, grade, x, y) { if (grade === 'perfect' && c.sec.name.startsWith('DROP')) f.burst(x, y, BOLT, 0.4, 1.6); },
         reset() { lastShake = -1; struck = new Set(); },
+      };
+    },
+  });
+
+  // ---------------------------------------------------------------------
+  //  06 PRISM: light through a prism. The melodic trance song from the
+  //  dodge game (128 BPM), played from its recording.
+  //  Chart: light splits into red, green and blue rings that spread at
+  //  different speeds; where two colours cross, white light (a note for
+  //  two presses); light sources glide round the edge and leave string
+  //  art; giant beams sweep in from the corners; a mirrored section.
+  //  Scene: a glass prism with a beam of white light fanning into a
+  //  rainbow, a faceted glass floor, a kaleidoscope, a starry nocturne.
+  // ---------------------------------------------------------------------
+  // the song's own score (beats), written out by the composing program of the dodge game
+  const SCORE_PRISM = {
+    kick: [32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,116,116.5,117,117.5,118,118.5,119,119.5,120,121,122,123,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159,160,161,162,163,164,165,166,167,168,169,170,171,172,173,174,175,176,177,178,179,180,181,182,183,200,201,202,203,204,205,206,207,208,209,210,211,212,213,214,215,216,217,218,219,220,221,222,223,224,225,226,227,228,229,230,231,232,233,234,235,236,237,238,239,240],
+    piano: [[0,2],[2,1],[3,1],[4,2],[6,1],[7,1],[8,2],[10,1],[11,1],[12,3],[16,2],[18,1],[19,1],[20,2],[22,1],[23,1],[24,2],[26,1],[27,1],[28,3],[64,0.5],[65,0.5],[66,0.5],[67,0.5],[68,0.5],[69,0.5],[70,0.5],[71,0.5],[72,0.5],[73,0.5],[74,0.5],[75,0.5],[76,0.5],[77,0.5],[78,0.5],[79,0.5],[80,0.5],[81,0.5],[82,0.5],[83,0.5],[84,0.5],[85,0.5],[86,0.5],[87,0.5],[88,0.5],[89,0.5],[90,0.5],[91,0.5],[92,0.5],[93,0.5],[94,0.5],[95,0.5],[184,2],[186,1],[187,1],[188,2],[190,1],[191,1],[192,2],[194,1],[195,1],[196,3]],
+    lead: [[120,1.5],[121.5,1.5],[123,1],[124,1.5],[125.5,1.5],[127,0.5],[127.5,0.5],[128,1.5],[129.5,1.5],[131,1],[132,1.5],[133.5,1.5],[135,1],[136,1.5],[137.5,1.5],[139,1],[140,1.5],[141.5,1.5],[143,0.5],[143.5,0.5],[144,1.5],[145.5,1.5],[147,1],[148,2],[150,1],[151,1],[152,1.5],[153.5,1.5],[155,1],[156,1.5],[157.5,1.5],[159,0.5],[159.5,0.5],[160,1.5],[161.5,1.5],[163,1],[164,1.5],[165.5,1.5],[167,1],[200,1.5],[201.5,1.5],[203,1],[204,1.5],[205.5,1.5],[207,0.5],[207.5,0.5],[208,1.5],[209.5,1.5],[211,1],[212,1.5],[213.5,1.5],[215,1],[216,1.5],[217.5,1.5],[219,1],[220,1.5],[221.5,1.5],[223,0.5],[223.5,0.5],[224,1.5],[225.5,1.5],[227,1],[228,2],[230,1],[231,1],[232,1.5],[233.5,1.5],[235,1],[236,1.5],[237.5,1.5],[239,0.5],[239.5,0.5]],
+    zap: [32,64,120,127.5,135.5,136,143.5,151.5,152,159.5,167.5,168,200,207.5,215.5,216,223.5,231.5,232,239.5,240],
+    crash: [32,64,96,120,168,184,200,240],
+    clap: [65,67,69,71,73,75,77,79,81,83,85,87,89,91,88,88.5,89,89.5,90,90.5,91,91.5,93,95,92,92.25,92.5,92.75,93,93.25,93.5,93.75,94,94.25,94.5,94.75,95,95.25,95.5,95.75,112,112.5,113,113.5,114,114.5,115,115.5,116,116.25,116.5,116.75,117,117.25,117.5,117.75,118,118.25,118.5,118.75,119,119.25,119.5,119.75,121,123,125,127,129,131,133,135,137,139,141,143,145,147,149,151,153,155,157,159,161,163,165,167,169,171,173,175,177,179,181,183,201,203,205,207,209,211,213,215,217,219,221,223,225,227,229,231,233,235,237,239],
+  };
+  rippleSong({
+    id: 'prism', title: 'PRISM', jp: '分光', genre: 'Melodic Trance', level: 7,
+    lede: '光でできた曲。白い光は<strong>赤・緑・青の波紋</strong>に分かれて違う速さで広がり、色が<strong>交わる点では白い光</strong>になります（同時押し）。光源が水面の縁を滑って糸の模様を描き、巨大な光の波が隅から押し寄せます。',
+    theme: { ink: '#07061a', ink2: '#1b1640', panel: 'rgba(7, 6, 26, 0.86)', paper: '#f6f3ff', muted: '#a8a3cc', accent: '#fff0c2' },
+    hues: ['#ff4f7a', '#45f0a8', '#5a8dff', '#fff0c2'],
+    bpm: 128, bars: 63, speed: 0.11, ring: { chroma: true }, attractFromBar: 30,
+    audioFile: { src: 'audio/prism.mp3', t0: 0.5 },
+    pulse: kickPulse(SCORE_PRISM.kick),
+    sections: [
+      { bar: 0, name: 'PRELUDE', hue: 3 }, { bar: 8, name: 'SPECTRUM', hue: 2 }, { bar: 16, name: 'STRING ART', hue: 1 },
+      { bar: 24, name: 'KALEIDOSCOPE', hue: 0 }, { bar: 28, name: 'RISE', hue: 3 }, { bar: 30, name: 'OPUS', hue: 0 },
+      { bar: 42, name: 'MIRROR', hue: 2 }, { bar: 46, name: 'NOCTURNE', hue: 1 }, { bar: 50, name: 'MASTERPIECE', hue: 3 },
+      { bar: 60, name: 'FIN', hue: 3 },
+    ],
+    chords: [{}],
+    chart({ drop, skip, wave, cross, tip }) {
+      const R = 0, G = 1, BL = 2, WH = 3;
+      // a pattern for a drop landing at `land`: a beat is a tap, [beat, beats] a hold, [beat, beats, 'S'] a circling hold
+      const pat = (land, notes) => {
+        const a = [];
+        for (const n of notes) {
+          const [b, l = 0, kind = 'H'] = [].concat(n), i = Math.round((b - land) * 2);
+          while (a.length <= i + l * 2) a.push('.');
+          a[i] = l ? kind : 'o';
+          for (let k = 1; k < l * 2; k++) a[i + k] = '-';
+        }
+        return a.join('');
+      };
+      const toward = ([x, y], tilt = 0) => Math.atan2(-y, -x) / DEG + tilt;
+      // a giant beam of white light sweeping in from off screen, arriving on `beat`
+      const beam = (beat, [x, y]) => wave(beat - 1, [x, y], WH, { speed: 0.5, r0: Math.hypot(x, y) - 1.4 });
+      // one drop of white light splitting into three rings: blue fastest, then green, then red
+      const spectrum = (land, p, notes, a0, fan = 60) => {
+        const sp = [[BL, 0.15], [G, 0.11], [R, 0.08]];
+        return notes.map((ns, k) => (ns.length ? drop(land, p, sp[k][0], pat(land, ns), { a: a0 + fan * k, speed: sp[k][1], turn: -20 * Math.sign(fan) }) : null)).filter(Boolean);
+      };
+
+      // PRELUDE: the piano, from the corners of a turning triangle of red, green and blue
+      const tri = (rot) => [0, 1, 2].map((k) => { const a = (rot + k * 120) * DEG; return [Math.cos(a) * 0.3, Math.sin(a) * 0.26]; });
+      const T1 = tri(-90), T2 = tri(90);
+      [[1, [2, 3, 4]], [5, [6, 7, 8]], [9, [10, 11, [12, 1.5]]]].forEach(([land, ns], k) => drop(land, T1[k], k, pat(land, ns), { a: -90 + k * 120, turn: 60, speed: 0.09 }));
+      drop(15, [0, 0], WH, pat(15, [16]), { a: 90, speed: 0.09 });
+      [[17, [18, 19, 20]], [21, [22, 23, 24]], [25, [26, 27, [28, 2, 'S']]]].forEach(([land, ns], k) => drop(land, T2[k], k, pat(land, ns), { a: 90 + k * 120, turn: 60, speed: 0.09, spin: 150 }));
+      // SPECTRUM: every bar a drop of white light splits into a fan of three colours
+      beam(32, [-1.7, 0]);
+      const SP = [[-0.4, -0.15], [0.4, 0.15], [-0.4, 0.15], [0.4, -0.15], [0, -0.22], [0, 0.22], [-0.45, 0], [0.45, 0]];
+      SP.forEach((p, k) => {
+        const land = 32 + k * 4, d = k >= 4;
+        spectrum(land, p, [d ? [land + 1, land + 1.5] : [land + 1], d ? [land + 2, land + 2.5] : [land + 2], [land + 3, land + 3.5]], toward(p, -60));
+      });
+      // STRING ART: light sources glide from corner to corner; each one's ring threads the next notes
+      beam(64, [1.7, 0]);
+      const PEG = [[-0.5, -0.3], [0.5, -0.3], [0.55, 0.3], [-0.55, 0.3]];
+      for (let k = 0; k < 8; k++) {
+        const land = 64 + k * 4, a = PEG[k % 4], b = PEG[(k + 1) % 4];
+        // the notes trail inward and behind the gliding source, like a wake
+        const phi = Math.atan2(b[1] - a[1], b[0] - a[0]) / DEG, inP = Math.cos((phi + 90) * DEG) * -a[0] + Math.sin((phi + 90) * DEG) * -a[1] > 0;
+        drop(land, a, k % 3, k % 2 ? '..oo.oo.' : '..o.oo.o', { path: [[4, b[0], b[1]]], ease: 'linear', a: phi + (inP ? 90 : -90), turn: inP ? 30 : -30 });
+      }
+      // KALEIDOSCOPE: giant rings from each corner in turn, their notes strung along the sweeping arc
+      const sweep = (land, c, hue, offs, spread = 6, v = 0.22) => {
+        const D = Math.hypot(c[0], c[1]), mid = (offs[0] + offs[offs.length - 1]) / 2, th = toward(c);
+        drop(land, c, hue, pat(land, offs.map((o) => land + o)), { speed: v, r0: D - v * mid, angs: offs.map((_, i) => th + spread * (i - (offs.length - 1) / 2) * Math.sign(c[0] * c[1] || 1)) });
+      };
+      [[-1.5, -0.95], [1.5, -0.95], [1.5, 0.95], [-1.5, 0.95]].forEach((c, k) => sweep(96 + k * 4, c, k % 3, k < 2 ? [1, 2, 3] : [1, 2, 2.5, 3]));
+      // RISE: sparks skip across, faster
+      skip(112, [-0.6, 0.3], [0.5, -0.25], WH, 'o.o.o.o.');
+      skip(116, [0.6, 0.3], [-0.5, -0.25], WH, 'o.o.oooo');
+      // OPUS: the lead melody; at the end of each phrase two colours meet in white light
+      beam(120, [-1.7, -0.3]);
+      // the lead melody bar by bar (plus the arpeggio note inside each long note); each bar's drop lands
+      // near where the last note was, so the melody wanders over the water; crossings on the zaps
+      const clampP = ([x, y]) => [Math.max(-0.5, Math.min(0.5, x)), Math.max(-0.28, Math.min(0.28, y))];
+      const lead = (from, to, crosses, style, start = [0, 0]) => {
+        const bars = new Map();
+        for (const [b, l] of SCORE_PRISM.lead) {
+          if (b < from || b >= to) continue;
+          const k = Math.floor((b - from) / 4);
+          if (!bars.has(k)) bars.set(k, []);
+          for (const x of l === 1.5 ? [b, b + 1] : [b]) if (!crosses.includes(x)) bars.get(k).push(x);
+        }
+        const events = [...[...bars.values()].filter((ns) => ns.length).map((ns) => ({ at: ns[0], ns })), ...crosses.map((z) => ({ at: z, z }))].sort((a, b) => a.at - b.at);
+        let last = start, k = 0;
+        const recent = [];
+        for (const e of events) {
+          if (e.z !== undefined) {
+            // two colours from either side of a point near the last note, crossing exactly there
+            const P = clampP([last[0] - Math.sign(last[0] || 1) * 0.2, last[1] - Math.sign(last[1] || 1) * 0.12]);
+            const A = drop(e.z - 3.5, [P[0] - 0.3, P[1] - 0.24], k % 2 ? G : R, ''), B2 = drop(e.z - 3.5, [P[0] + 0.3, P[1] - 0.24], k % 2 ? BL : G, '');
+            cross(e.z, A, B2, { side: 0 });
+            last = P;
+            recent.push(P);
+            continue;
+          }
+          // the next drop goes a step away from the last note, in a direction clear of the notes just played
+          const ns = e.ns, land = ns[0] - 1;
+          let p = null, bestD = -1;
+          for (let j = 0; j < 6; j++) {
+            const dir = (k * 137.5 + j * 60) * DEG, q = clampP([last[0] + Math.cos(dir) * 0.38, last[1] + Math.sin(dir) * 0.38]);
+            const dmin = Math.min(9, ...recent.map(([x, y]) => Math.hypot(q[0] - x, q[1] - y)));
+            if (dmin > bestD) { bestD = dmin; p = q; }
+            if (dmin >= 0.32) break;
+          }
+          let ds;
+          if (style === 'spectrum' && k % 2 === 0 && ns.length >= 3) {
+            const c1 = Math.ceil(ns.length * 0.4), c2 = Math.ceil(ns.length * 0.8);
+            ds = spectrum(land, p, [ns.slice(0, c1), ns.slice(c1, c2), ns.slice(c2)], toward(p, -35), 35);
+          } else if (style === 'spectrum') {
+            // a light source sliding as it sings
+            const q = clampP([-p[0] * 0.5, p[1] + (p[1] > 0 ? -0.25 : 0.25)]);
+            const phi = Math.atan2(q[1] - p[1], q[0] - p[0]) / DEG;
+            ds = [drop(land, p, (k + 1) % 3, pat(land, ns), { path: [[ns[ns.length - 1] - land, q[0], q[1]]], ease: 'linear', a: phi + 120, turn: 45 })];
+          } else ds = [drop(land, p, k % 3, pat(land, ns), { a: toward(p, 30), turn: 60 })];
+          const lastDrop = ds.reduce((m, d) => (d.beat + d.notes[d.notes.length - 1].offEnd > m.beat + m.notes[m.notes.length - 1].offEnd ? d : m));
+          last = tip(lastDrop, -1).p;
+          for (const d of ds) d.notes.forEach((_, i) => recent.push(tip(d, i).p));
+          recent.splice(0, Math.max(0, recent.length - 8));
+          k++;
+        }
+      };
+      lead(120, 168, [127.5, 136, 143.5, 152, 159.5, 168], 'plain', [-0.7, 0.1]);
+      // MIRROR: every drop has its reflection across the middle; the two take turns
+      beam(168, [1.7, 0.3]);
+      [0.15, -0.15, 0.2, -0.1].forEach((y, k) => {
+        const land = 168 + k * 4, busy = k >= 2, a = y > 0 ? -90 : 90;
+        drop(land, [-0.28, y], k % 3, busy ? (k === 3 ? '..oo..o' : '..oo..oo') : '..o...o.', { a, turn: y > 0 ? 35 : -35 });
+        drop(land, [0.28, y], k % 3, busy ? '....oo' : '....o...o.', { a, turn: y > 0 ? -35 : 35 });
+      });
+      // NOCTURNE: the piano again, alone; ride the long notes
+      beam(184, [0, -1.3]);
+      drop(183, [0, -0.15], WH, pat(183, [[184, 1.5], 186, 187]), { a: 180, turn: 60, speed: 0.08 });
+      drop(187, [0.25, 0.1], BL, pat(187, [[188, 1.5], 190, 191]), { a: 200, turn: 60, speed: 0.08 });
+      drop(191, [-0.25, 0.1], R, pat(191, [[192, 1.5], 194, 195]), { a: -20, turn: 60, speed: 0.08 });
+      drop(195, [0, 0.05], G, pat(195, [[196, 3, 'S']]), { a: -90, speed: 0.08, spin: 240 });
+      // MASTERPIECE: the melody a half step up; now it splits into colours and slides as it goes
+      beam(200, [-1.7, 0.3]);
+      lead(200, 240, [207.5, 216, 223.5, 232, 239.5], 'spectrum', [0.3, -0.2]);
+      beam(240, [1.7, -0.3]);
+      beam(242, [-1.7, 0.3]);
+    },
+    song: { arrange() {} },
+    scene(kit, f) {
+      const { g, rgba, hex, hash, TAU } = kit;
+      const WHITE = hex('#ffffff'), RAIN = ['#ff3b5c', '#ff9a3b', '#ffe94a', '#4dff7a', '#3bd5ff', '#4a6bff', '#b04dff'].map(hex);
+      const TARGET = { PRELUDE: 0.35, SPECTRUM: 1, 'STRING ART': 0.6, KALEIDOSCOPE: 0.45, RISE: 0.85, OPUS: 1, MIRROR: 0.7, NOCTURNE: 0.08, MASTERPIECE: 1.25, FIN: 0.5 };
+      const ART = f.CHART.filter((n) => n.beat >= 64 && n.beat < 96);
+      const rays = [];
+      let beamI = 0.2;
+      const noteAt = (n) => { const d = n.drop, off = (n.t - d.t) / f.SPB, [cx, cy] = f.ringC(d, off), r = f.ringR(d, off); return f.toScreen(cx + Math.cos(n.ang) * r, cy + Math.sin(n.ang) * r); };
+      function fan(cx, cy, ang, I, spread, len) {
+        // white light in, a rainbow out
+        g.globalCompositeOperation = 'lighter';
+        RAIN.forEach((col, k) => {
+          const a0 = ang - spread / 2 + (spread * k) / 7, a1 = a0 + spread / 7;
+          const gr = g.createRadialGradient(cx, cy, 0, cx, cy, len);
+          gr.addColorStop(0, rgba(col, 0.28 * I)); gr.addColorStop(1, rgba(col, 0));
+          g.fillStyle = gr;
+          g.beginPath(); g.moveTo(cx, cy); g.arc(cx, cy, len, a0, a1); g.closePath(); g.fill();
+        });
+        g.globalCompositeOperation = 'source-over';
+      }
+      return {
+        back(c) {
+          const { W, H, F } = f;
+          beamI += ((TARGET[c.sec.name] ?? 0.5) - beamI) * Math.min(1, c.dt * 1.5);
+          const I = beamI * (0.8 + 0.35 * c.pulse);
+          // a faceted glass floor: a triangular lattice that glints
+          g.lineWidth = 1;
+          const s = F.u * 0.16;
+          for (let row = -1; row * s * 0.866 < H + s; row++) {
+            for (let col = -1; col * s < W + s; col++) {
+              const x = col * s + (row % 2 ? s / 2 : 0), y = row * s * 0.866, k = row * 97 + col;
+              const tw = 0.025 + 0.035 * Math.max(0, Math.sin(c.now * 0.9 + hash(k) * 9));
+              g.strokeStyle = rgba(RAIN[Math.abs(k) % 7], tw);
+              g.beginPath(); g.moveTo(x, y); g.lineTo(x + s, y); g.lineTo(x + s / 2, y + s * 0.866); g.closePath(); g.stroke();
+            }
+          }
+          // the kaleidoscope: six mirrored wedges of coloured glass turning behind everything
+          if (c.sec.name === 'KALEIDOSCOPE' || c.sec.name === 'MASTERPIECE') {
+            const k = c.sec.name === 'KALEIDOSCOPE' ? 1 : 0.45;
+            g.save(); g.translate(F.cx, F.cy); g.globalCompositeOperation = 'lighter';
+            for (let w = 0; w < 12; w++) {
+              g.save(); g.rotate((w * TAU) / 12 + c.now * 0.15); if (w % 2) g.scale(1, -1);
+              for (let i = 0; i < 7; i++) {
+                const r1 = F.u * (0.15 + hash(i * 3 + 1) * 0.8), a1 = hash(i * 3 + 2) * (TAU / 12), sz = F.u * (0.05 + hash(i) * 0.12);
+                const x = Math.cos(a1) * r1, y = Math.sin(a1) * r1;
+                g.fillStyle = rgba(RAIN[i], 0.07 * k * (0.6 + 0.4 * Math.sin(c.now * 2 + i)));
+                g.beginPath(); g.moveTo(x, y - sz); g.lineTo(x + sz, y + sz * 0.6); g.lineTo(x - sz, y + sz * 0.6); g.closePath(); g.fill();
+              }
+              g.restore();
+            }
+            g.restore();
+          }
+          // stars for the nocturne
+          if (c.sec.name === 'NOCTURNE' || c.sec.name === 'PRELUDE') {
+            for (let i = 0; i < 90; i++) {
+              const a = 0.25 + 0.75 * Math.max(0, Math.sin(c.now * (0.5 + hash(i)) + i));
+              g.fillStyle = rgba(WHITE, 0.5 * a * (c.sec.name === 'NOCTURNE' ? 1 : 0.4));
+              g.fillRect(hash(i * 3 + 7) * W, hash(i * 5 + 11) * H, 1.5, 1.5);
+            }
+          }
+          // the beam: white light from the left edge into the prism, a rainbow fanning out of it
+          const [px, py] = f.toScreen(-0.05, 0), ang = (F.portrait ? Math.PI / 2 : 0) + Math.sin(c.now * 0.2) * 0.25;
+          if (I > 0.02) {
+            const sx = px - Math.cos(ang) * W, sy = py - Math.sin(ang) * W;
+            g.globalCompositeOperation = 'lighter';
+            g.strokeStyle = rgba(WHITE, 0.18 * I); g.lineWidth = 10; g.beginPath(); g.moveTo(sx, sy); g.lineTo(px, py); g.stroke();
+            g.strokeStyle = rgba(WHITE, 0.5 * I); g.lineWidth = 2; g.stroke();
+            g.globalCompositeOperation = 'source-over';
+            fan(px, py, ang, I, 0.5 + 0.1 * c.pulse, Math.hypot(W, H));
+            if (c.sec.name === 'MASTERPIECE') { fan(px, py, ang + c.now * 0.6, I * 0.5, 0.35, Math.hypot(W, H)); fan(px, py, ang - c.now * 0.6 + Math.PI, I * 0.5, 0.35, Math.hypot(W, H)); }
+          }
+          // the prism itself, turning slowly
+          const ps = F.u * 0.07;
+          g.save(); g.translate(px, py); g.rotate(c.now * 0.25);
+          const pg = g.createLinearGradient(-ps, -ps, ps, ps);
+          pg.addColorStop(0, rgba(WHITE, 0.16)); pg.addColorStop(1, rgba(RAIN[5], 0.08));
+          g.fillStyle = pg; g.strokeStyle = rgba(WHITE, 0.45 + 0.3 * c.pulse); g.lineWidth = 1.5;
+          g.beginPath(); for (let k = 0; k < 3; k++) { const a = -Math.PI / 2 + (k * TAU) / 3; g.lineTo(Math.cos(a) * ps, Math.sin(a) * ps); } g.closePath(); g.fill(); g.stroke();
+          g.restore();
+        },
+        surface(c) {
+          // string art: each note of the gliding section is threaded to the next once both have sounded
+          if (c.beat > 62 && c.beat < 104) {
+            const fade = c.beat < 96 ? 1 : 1 - (c.beat - 96) / 8;
+            g.lineWidth = 1;
+            for (let i = 1; i < ART.length; i++) {
+              const a = ART[i - 1], b = ART[i];
+              if (b.t > c.now) break;
+              const [ax, ay] = noteAt(a), [bx, by] = noteAt(b);
+              const gr = g.createLinearGradient(ax, ay, bx, by);
+              gr.addColorStop(0, rgba(f.HUES[a.drop.hue], 0.45 * fade)); gr.addColorStop(1, rgba(f.HUES[b.drop.hue], 0.45 * fade));
+              g.strokeStyle = gr; g.beginPath(); g.moveTo(ax, ay); g.lineTo(bx, by); g.stroke();
+              // the string art fills in: lines from each note to one a few back
+              if (i >= 3) { const [qx, qy] = noteAt(ART[i - 3]); g.strokeStyle = rgba(f.HUES[b.drop.hue], 0.14 * fade); g.beginPath(); g.moveTo(qx, qy); g.lineTo(bx, by); g.stroke(); }
+            }
+          }
+          // the mirror: a line of light down the middle, and every ring reflected in it
+          if (c.sec.name === 'MIRROR') {
+            const into = (c.beat - 168) / 16, a = Math.min(1, into * 6) * Math.min(1, (1 - into) * 6);
+            const [x0, y0] = f.toScreen(0, -0.6), [x1, y1] = f.toScreen(0, 0.6);
+            g.strokeStyle = rgba(WHITE, 0.5 * a); g.lineWidth = 2; g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.stroke();
+            for (const r of f.rings) { g.strokeStyle = rgba(f.HUES[r.hue], 0.15 * a); g.lineWidth = 1.5; f.ringPath(-r.x, r.y, r.R); g.stroke(); }
+          }
+        },
+        front(c) {
+          // rainbow rays from white light that was struck
+          g.globalCompositeOperation = 'lighter';
+          for (let i = rays.length - 1; i >= 0; i--) {
+            const r = rays[i], age = c.now - r.t;
+            if (age > 0.5 || age < 0) { rays.splice(i, 1); continue; }
+            const len = f.F.u * (0.15 + age * 1.2), a = 1 - age / 0.5;
+            RAIN.forEach((col, k) => {
+              const ang = r.a + (k * TAU) / 7;
+              g.strokeStyle = rgba(col, 0.7 * a); g.lineWidth = 3 * a + 1;
+              g.beginPath(); g.moveTo(r.x + Math.cos(ang) * len * 0.3, r.y + Math.sin(ang) * len * 0.3); g.lineTo(r.x + Math.cos(ang) * len, r.y + Math.sin(ang) * len); g.stroke();
+            });
+          }
+          g.globalCompositeOperation = 'source-over';
+        },
+        hit(c, n, grade, x, y) {
+          if (grade === 'miss') return;
+          if (n.cross) { rays.push({ x, y, t: c.now, a: Math.random() * TAU }); f.flash(0.12, WHITE); }
+          else if (grade === 'perfect') f.burst(x, y, RAIN[Math.floor(Math.random() * 7)], 0.35, 1.2);
+        },
+        reset() { rays.length = 0; beamI = 0.2; },
+      };
+    },
+  });
+
+  // ---------------------------------------------------------------------
+  //  07 ABYSS: a dive into the deep sea. The deep-sea ambient song from
+  //  the dodge game (90 BPM), played from its recording.
+  //  Chart: drops sink as they ripple; an anglerfish's lure drifts and
+  //  rings trail from it; jellyfish pulse out and draw back in (rings
+  //  that close inward, holds that ride them to the centre); in the dark
+  //  water the notes are hidden until a sonar sweep finds them, and its
+  //  echo strikes one spot again and again; in the end the abyss pulls
+  //  every ring inward while a whale passes and its song is a long ride.
+  //  Scene: the water darkens with depth, plankton lights up wherever a
+  //  ripple passes, marine snow, jellyfish, the lure, the whale, a depth gauge.
+  // ---------------------------------------------------------------------
+  // the song's own score (beats), written out by the composing program of the dodge game
+  const SCORE_ABYSS = {
+    kick: [16,20,24,28,32,36,40,44,48,50.5,52,54.5,56,58.5,60,62.5,64,66.5,68,70.5,72,74.5,76,78.5,80,82.5,84,86.5,88,90.5,92,94.5,96,98.5,100,102.5,104,106.5,108,110.5,112,114.5,116,118.5,120,122.5,124,126.5,128,130.5,132,134.5,136,138.5,140,142.5,144,146.5,148,150.5,152,154.5,156,158.5],
+    ping: [0,8,16,24,32,40,48,56,64,72,80,82,86,88,90,94,96,98,102,104,106,110,112,120,128,136,144,152,160],
+    whale: [[8,6],[36,6],[68,6],[92,6],[108,6],[132,6],[148,6],[160,8]],
+    melA: [16,16.5,17,17.5,18,18.5,19,19.5,20,20.5,21,21.5,22,22.5,23,23.5,24,24.5,25,25.5,26,26.5,27,27.5,28,28.5,29,29.5,30,30.5,31,31.5,32,32.5,33,33.5,34,34.5,35,35.5,36,36.5,37,37.5,38,38.5,39,39.5,40,40.5,41,41.5,42,42.5,43,43.5,44,44.5,45,45.5,46,46.5,47,47.5],
+    melB: [[48,1],[49,1],[50,1],[51,1],[52,2],[54,0.5],[54.5,0.5],[55,1],[56,1],[57,1],[58,1],[59,1],[60,2],[64,1],[65,1],[66,1],[67,1],[68,2],[70,0.5],[70.5,0.5],[71,1],[72,1],[73,1],[74,1],[75,1],[76,2]],
+    melC: [[120,1],[121,0.5],[121.5,0.5],[122,1],[123,0.5],[123.5,0.5],[124,1],[125,0.5],[125.5,0.5],[126,1],[127,0.5],[127.5,0.5],[128,1],[129,0.5],[129.5,0.5],[130,1],[131,0.5],[131.5,0.5],[132,1],[133,0.5],[133.5,0.5],[134,1],[135,0.5],[135.5,0.5],[136,1],[137,0.5],[137.5,0.5],[138,1],[139,0.5],[139.5,0.5],[140,1],[141,0.5],[141.5,0.5],[142,1],[143,0.5],[143.5,0.5],[144,1],[145,0.5],[145.5,0.5],[146,1],[147,0.5],[147.5,0.5],[148,1],[149,1],[150,2],[152,1],[153,0.5],[153.5,0.5],[154,1],[155,0.5],[155.5,0.5],[156,1],[157,0.5],[157.5,0.5],[158,1],[159,0.5],[159.5,0.5]],
+  };
+  const ABYSS_JELLY = []; // jellyfish: { from, to, x, y, hue } in beats and field units, filled in by the chart
+  const ABYSS_SONAR = [[-0.98, 0.12], [0.98, -0.12]];
+  const abyssLure = (beat) => [0.45 * Math.sin(beat * 0.11 + 1), 0.22 * Math.sin(beat * 0.23)];
+  rippleSong({
+    id: 'abyss', title: 'ABYSS', jp: '深淵', genre: 'Deep Sea Ambient', level: 7,
+    lede: '深海へ潜っていく曲。雫は沈みながら波紋を広げ、クラゲは広がっては<strong>縮む波紋</strong>で脈打ちます。暗い海では<strong>ソナーが届くまでノーツが見えません</strong>。最後は深淵がすべての波紋を引き込み、クジラの歌に乗って長く漂います。',
+    theme: { ink: '#01060d', ink2: '#05203a', panel: 'rgba(1, 6, 13, 0.88)', paper: '#e2f6ff', muted: '#7fa3b8', accent: '#ffcf6b' },
+    hues: ['#3ee6ff', '#8a7bff', '#4dffb8', '#ffcf6b'],
+    bpm: 90, bars: 42, speed: 0.09, attractFromBar: 20,
+    audioFile: { src: 'audio/abyss.mp3', t0: 0.5 },
+    pulse: kickPulse(SCORE_ABYSS.kick),
+    sections: [
+      { bar: 0, name: 'SURFACE', hue: 0 }, { bar: 4, name: 'DESCENT', hue: 2 }, { bar: 12, name: 'JELLYFISH', hue: 1 },
+      { bar: 20, name: 'DARK WATER', hue: 0 }, { bar: 28, name: 'RISING', hue: 2 }, { bar: 30, name: 'LEVIATHAN', hue: 1 },
+      { bar: 40, name: 'ABYSS', hue: 3 },
+    ],
+    chords: [{}],
+    chart({ drop, skip, wave, pulse, tip }) {
+      const CY = 0, VI = 1, AQ = 2, GO = 3;
+      const pat = (land, notes) => {
+        const a = [];
+        for (const n of notes) {
+          const [b, l = 0, kind = 'H'] = [].concat(n), i = Math.round((b - land) * 2);
+          while (a.length <= i + l * 2) a.push('.');
+          a[i] = l ? kind : 'o';
+          for (let k = 1; k < l * 2; k++) a[i + k] = '-';
+        }
+        return a.join('');
+      };
+      const toward = ([x, y], tilt = 0) => Math.atan2(-y, -x) / DEG + tilt;
+      // a sonar ping from the submarine at the edge; it uncovers dark notes as it passes
+      const ping = (beat, side) => wave(beat, ABYSS_SONAR[side], CY, { speed: 0.55, r0: 0.05, reveal: true });
+
+      // SURFACE: drops that sink as they ripple
+      ping(0, 0); ping(8, 1);
+      drop(1, [-0.3, -0.3], CY, pat(1, [2, 3, 4]), { path: [[4, -0.3, 0.05]], ease: 'linear', a: 30, turn: 60 });
+      drop(5, [0.3, -0.3], AQ, pat(5, [6, 7, 8]), { path: [[4, 0.3, 0.05]], ease: 'linear', a: 150, turn: -60 });
+      drop(9, [-0.05, -0.32], VI, pat(9, [10, 11, [12, 2]]), { path: [[5, -0.05, 0.1]], ease: 'linear', a: 90, turn: 60 });
+      // DESCENT: a sinking drop on each heartbeat over the kalimba; then the anglerfish's lure drifts and sheds rings
+      for (let k = 0; k < 8; k++) {
+        const land = 16 + k * 4, notes = k % 2 ? [land + 1, land + 1.5, land + 2, land + 3, land + 3.5] : [land + 1, land + 2, land + 2.5, land + 3, land + 3.5];
+        if (k < 4) {
+          const x = [-0.4, 0.35, -0.2, 0.45][k];
+          drop(land, [x, -0.25], [CY, AQ][k % 2], pat(land, notes), { path: [[4, x, 0.0]], ease: 'linear', a: x < 0 ? 20 : 160, turn: x < 0 ? 50 : -50 });
+        } else {
+          const path = [1, 2, 3, 4].map((o) => [o, ...abyssLure(land + o)]);
+          drop(land, abyssLure(land), GO, pat(land, notes), { path, ease: 'linear', a: toward(abyssLure(land), 40), turn: 80 });
+        }
+      }
+      ping(16, 0); ping(32, 1); ping(40, 0);
+      // JELLYFISH: each one pulses out (notes on the spreading ring), then draws in (a ring that closes; a hold rides it home)
+      const jelly = (p, hue, outLand, outNotes, inLand, inNotes, r0 = 0.34, inSpeed = -0.11) => {
+        const out = drop(outLand, p, hue, pat(outLand, outNotes), { a: toward(p, 30), turn: 55 });
+        const inn = drop(inLand, p, hue, pat(inLand, inNotes), { speed: inSpeed, r0, a: toward(p, -60), turn: 60 });
+        ABYSS_JELLY.push({ from: outLand - 1, to: inLand + (inNotes.length ? 4 : 0), x: p[0], y: p[1], hue });
+        return [out, inn];
+      };
+      jelly([-0.35, -0.08], VI, 47, [48, 49, 50, 51], 51, [[52, 1.5]]);
+      jelly([-0.05, 0.12], AQ, 53, [54, 54.5, 55, 56], 56, [57, 58, 59]);
+      jelly([0.38, -0.05], VI, 59, [[60, 1.5]], 62, []);
+      jelly([0.3, 0.15], CY, 63, [64, 65, 66, 67], 67, [[68, 1.5]]);
+      jelly([0, -0.12], AQ, 69, [70, 70.5, 71, 72], 72, [73, 74, 75]);
+      jelly([-0.38, 0.05], VI, 75, [[76, 1.5]], 78, []);
+      // DARK WATER: the notes are hidden until the sonar finds them; a ping's echo strikes one spot over and over
+      const PINGS = [80, 82, 86, 88, 90, 94, 96, 98, 102, 104, 106, 110];
+      PINGS.forEach((b) => ping(b, b < 96 ? 0 : 1));
+      const DK = [[-0.1, -0.15], [0.3, 0.12], [-0.35, 0.12], [0.35, -0.12], [0.05, 0.18], [-0.3, -0.15], [0.25, 0], [-0.1, 0.1]];
+      DK.forEach((p, k) => {
+        const land = 81 + k * 4;
+        if (k % 4 === 3) pulse(land, p, CY, { a: toward(p, 0), off: 1, n: 3, gap: 0.5, dark: true });
+        else drop(land, p, [CY, AQ, VI][k % 3], pat(land, k % 2 ? [land + 1, land + 1.5, land + 2.5, land + 3] : [land + 1, land + 2, land + 2.5, land + 3]), { a: toward(p, 40), turn: 60, dark: true });
+      });
+      // RISING: bubbles skip up towards the light
+      skip(112, [-0.5, 0.38], [-0.1, -0.35], AQ, 'o.o.o.o.');
+      skip(116, [0.5, 0.38], [0.1, -0.35], AQ, 'o.o.oooo');
+      // LEVIATHAN: the abyss pulls every ring inward; the whale's song is a long ride along its giant ring
+      const C3 = SCORE_ABYSS.melC;
+      const pull = (land, p, hue, notes) => drop(land, p, hue, pat(land, notes), { speed: -0.1, r0: 0.5, a: toward(p, 40), turn: 45 });
+      const PL = [[-0.3, -0.1], [0.3, 0.1], [0.25, -0.12], [-0.25, 0.12], [0, -0.05], [-0.35, 0], [0.35, 0], [0, 0.1], [-0.2, -0.12], [0.2, 0.12]];
+      let k = 0;
+      for (let b = 120; b < 160; b += 4) {
+        if ((b >= 132 && b < 138) || (b >= 148 && b < 154)) continue;
+        const ns = C3.filter(([x]) => x >= b && x < b + 4 && !(x >= 131.5 && x < 138) && !(x >= 147.5 && x < 154)).map(([x]) => x);
+        if (ns.length) pull(b - 1, PL[k % PL.length], [VI, CY, AQ][k % 3], ns);
+        k++;
+      }
+      // whale song: a slow ring from far off screen; ride it along as it passes
+      drop(131, [-1.5, 0.1], GO, pat(131, [[132, 5, 'S']]), { speed: 0.06, r0: 1.0, a: -8, spin: 26 });
+      drop(147, [1.5, -0.1], GO, pat(147, [[148, 5, 'S']]), { speed: 0.06, r0: 1.0, a: 188, spin: -26 });
+      // ABYSS: the last whale call, one long circling ride down into the dark
+      drop(159, [0, 0], GO, pat(159, [[160, 6, 'S']]), { speed: 0.05, a: -90, spin: 300 });
+    },
+    song: { arrange() {} },
+    scene(kit, f) {
+      const { g, rgba, hex, hash, TAU } = kit;
+      const SURF = hex('#0b5a7a'), DEEP = hex('#010409'), SNOW = hex('#cfe8f0'), WHALE = hex('#0b1a2a'), LURE = hex('#ffcf6b');
+      const PLANK = Array.from({ length: 160 }, (_, i) => ({ x: (hash(i * 3 + 1) * 2 - 1) * 0.95, y: (hash(i * 3 + 2) * 2 - 1) * 0.6, p: hash(i * 3 + 3) * TAU, lit: 0, hue: 0 }));
+      const WHALES = SCORE_ABYSS.whale;
+      const END = 168;
+      function drawWhale(cx, cy, s, dir, a, beat) {
+        // a whale seen from above-ish: a long body, a fluke that beats, two long flippers
+        g.save(); g.translate(cx, cy); g.scale(dir * s, s);
+        const sw = Math.sin(beat * 1.2) * 0.12;
+        g.fillStyle = rgba(WHALE, 0.85 * a); g.strokeStyle = rgba(hex('#3ee6ff'), 0.18 * a); g.lineWidth = 2 / s;
+        g.beginPath();
+        g.moveTo(1, 0);
+        g.bezierCurveTo(0.9, -0.22, 0.2, -0.28, -0.6, -0.12);
+        g.quadraticCurveTo(-0.9, -0.05 + sw, -1.05, -0.2 + sw);
+        g.lineTo(-1.0, 0 + sw); g.lineTo(-1.05, 0.2 + sw);
+        g.quadraticCurveTo(-0.9, 0.05 + sw, -0.6, 0.12);
+        g.bezierCurveTo(0.2, 0.28, 0.9, 0.22, 1, 0);
+        g.fill(); g.stroke();
+        for (const side of [-1, 1]) { g.beginPath(); g.moveTo(0.35, 0.18 * side); g.quadraticCurveTo(0.1, 0.5 * side, -0.05, 0.55 * side); g.quadraticCurveTo(0.15, 0.3 * side, 0.2, 0.2 * side); g.fill(); }
+        g.restore();
+      }
+      return {
+        back(c) {
+          const { W, H, F } = f;
+          const depth = Math.max(0, Math.min(1, c.beat / 150));
+          // the water darkens as we go down; light from the surface fades
+          const top = kit.mix(SURF, DEEP, Math.min(1, depth * 1.6)), bot = kit.mix(hex('#03263b'), DEEP, Math.min(1, depth * 1.2 + 0.3));
+          const gr = g.createLinearGradient(0, 0, 0, H);
+          gr.addColorStop(0, rgba(top, 1)); gr.addColorStop(1, rgba(bot, 1));
+          g.fillStyle = gr; g.fillRect(-20, -20, W + 40, H + 40);
+          if (depth < 0.45) {
+            g.globalCompositeOperation = 'lighter';
+            for (let i = 0; i < 6; i++) {
+              const x = W * (0.1 + i * 0.17) + Math.sin(c.now * 0.3 + i) * 30, a = (0.06 - depth * 0.13) * (0.6 + 0.4 * Math.sin(c.now * 0.5 + i * 2));
+              if (a <= 0) continue;
+              const rg = g.createLinearGradient(0, 0, 0, H * 0.9);
+              rg.addColorStop(0, rgba(SNOW, a)); rg.addColorStop(1, rgba(SNOW, 0));
+              g.fillStyle = rg;
+              g.beginPath(); g.moveTo(x - 20, 0); g.lineTo(x + 20, 0); g.lineTo(x + 90 + i * 10, H * 0.9); g.lineTo(x - 40, H * 0.9); g.closePath(); g.fill();
+            }
+            g.globalCompositeOperation = 'source-over';
+          }
+          // the whales, far below, passing while they sing
+          for (const [b, len] of WHALES) {
+            const u = (c.beat - (b - 2)) / (len + 6);
+            if (u < 0 || u > 1) continue;
+            const big = b >= 120, dir = WHALES.indexOf(WHALES.find((w) => w[0] === b)) % 2 ? -1 : 1;
+            const x = dir > 0 ? -0.4 * W + u * W * 1.8 : W * 1.4 - u * W * 1.8, y = H * (big ? 0.55 : 0.7) + Math.sin(u * 3) * H * 0.05;
+            drawWhale(x, y, F.u * (big ? 0.7 : 0.35), dir, Math.sin(Math.PI * u) * (big ? 0.9 : 0.5), c.beat);
+          }
+          // plankton that lights up wherever a ripple passes
+          g.globalCompositeOperation = 'lighter';
+          for (const p of PLANK) {
+            for (const r of f.rings) {
+              const d = Math.hypot(p.x - r.x, p.y - r.y);
+              if (Math.abs(d - r.R) < 0.035) { p.lit = 1; p.hue = r.hue; }
+            }
+            p.lit = Math.max(0, p.lit - c.dt * 1.2);
+            const [sx, sy] = f.toScreen(p.x + Math.sin(c.now * 0.2 + p.p) * 0.02, p.y + Math.cos(c.now * 0.17 + p.p) * 0.02);
+            const base = 0.05 + depth * 0.05;
+            g.fillStyle = rgba(f.HUES[p.hue], base + p.lit * 0.8);
+            g.beginPath(); g.arc(sx, sy, 1.2 + p.lit * 2.2, 0, TAU); g.fill();
+          }
+          g.globalCompositeOperation = 'source-over';
+          // the submarine's lamp, blinking on each ping
+          for (const [i, [sxF, syF]] of ABYSS_SONAR.entries()) {
+            let lastPing = -99;
+            for (const d of f.DROPS) { if (d.reveal && d.x === sxF && d.beat <= c.beat) lastPing = d.beat; }
+            const a = Math.exp(-(c.beat - lastPing) * 2);
+            let [sx, sy] = f.toScreen(sxF, syF); sx = Math.min(W - 4, Math.max(4, sx)); sy = Math.min(H - 4, Math.max(4, sy));
+            const gl = g.createRadialGradient(sx, sy, 0, sx, sy, F.u * 0.25);
+            gl.addColorStop(0, rgba(f.HUES[0], 0.15 + 0.5 * a)); gl.addColorStop(1, rgba(f.HUES[0], 0));
+            g.fillStyle = gl; g.fillRect(sx - F.u * 0.25, sy - F.u * 0.25, F.u * 0.5, F.u * 0.5);
+            void i;
+          }
+        },
+        surface(c) {
+          const { F } = f;
+          // jellyfish: the bell swells with its ring and shrinks as the ring draws in
+          for (const j of ABYSS_JELLY) {
+            if (c.beat < j.from - 1 || c.beat > j.to + 1) continue;
+            const a = Math.min(1, (c.beat - j.from + 1)) * Math.min(1, j.to + 1 - c.beat);
+            const [sx, sy] = f.toScreen(j.x, j.y), col = f.HUES[j.hue];
+            const beat = c.beat, swell = 0.75 + 0.25 * Math.sin(beat * Math.PI) + 0.3 * c.pulse;
+            const R = F.u * 0.06 * swell;
+            g.globalCompositeOperation = 'lighter';
+            const gl = g.createRadialGradient(sx, sy, 0, sx, sy, R * 2.5);
+            gl.addColorStop(0, rgba(col, 0.25 * a)); gl.addColorStop(1, rgba(col, 0));
+            g.fillStyle = gl; g.fillRect(sx - R * 2.5, sy - R * 2.5, R * 5, R * 5);
+            g.globalCompositeOperation = 'source-over';
+            g.strokeStyle = rgba(col, 0.5 * a); g.lineWidth = 1.2;
+            for (let t = 0; t < 7; t++) {
+              const tx = sx + (t - 3) * R * 0.28;
+              g.beginPath(); g.moveTo(tx, sy);
+              for (let k = 1; k <= 8; k++) g.lineTo(tx + Math.sin(c.now * 3 + t + k * 0.8) * R * 0.15, sy + k * R * 0.32);
+              g.stroke();
+            }
+            g.fillStyle = rgba(col, 0.35 * a); g.strokeStyle = rgba(col, 0.85 * a); g.lineWidth = 1.5;
+            g.beginPath(); g.ellipse(sx, sy, R, R * 0.75, 0, Math.PI, TAU); g.closePath(); g.fill(); g.stroke();
+          }
+          // the anglerfish's lure, glowing on its stalk while it drifts
+          if (c.beat > 30 && c.beat < 50) {
+            const a = Math.min(1, (c.beat - 30) / 2) * Math.min(1, (50 - c.beat) / 2);
+            const [lx, ly] = f.toScreen(...abyssLure(c.beat));
+            g.strokeStyle = rgba(LURE, 0.3 * a); g.lineWidth = 1.5;
+            g.beginPath(); g.moveTo(lx, ly); g.quadraticCurveTo(lx + F.u * 0.12, ly - F.u * 0.15, lx + F.u * 0.22, ly + F.u * 0.02); g.stroke();
+            const gl = g.createRadialGradient(lx, ly, 0, lx, ly, F.u * 0.08);
+            gl.addColorStop(0, rgba(hex('#fffbe0'), 0.9 * a)); gl.addColorStop(0.3, rgba(LURE, 0.5 * a)); gl.addColorStop(1, rgba(LURE, 0));
+            g.fillStyle = gl; g.fillRect(lx - F.u * 0.08, ly - F.u * 0.08, F.u * 0.16, F.u * 0.16);
+          }
+        },
+        front(c) {
+          const { W, H } = f;
+          // marine snow drifting down
+          if (!kit.reduceMotion) {
+            g.fillStyle = rgba(SNOW, 0.35);
+            for (let i = 0; i < 70; i++) {
+              const sp = 8 + hash(i * 7 + 1) * 14, y = ((c.now * sp + hash(i * 7 + 2) * H) % H), x = hash(i * 7 + 3) * W + Math.sin(c.now * 0.4 + i) * 10;
+              g.fillRect(x, y, 1.4, 1.4);
+            }
+          }
+          // the heartbeat closes the dark in at the edges
+          const v = g.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.hypot(W, H) * 0.6);
+          v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, `rgba(0,0,0,${0.35 + 0.25 * c.pulse})`);
+          g.fillStyle = v; g.fillRect(0, 0, W, H);
+          // the depth gauge
+          const depthM = Math.round(Math.max(0, Math.min(END, c.beat)) / END * 3800);
+          g.fillStyle = rgba(f.MUTED, 0.8); g.font = '700 12px "Zen Kaku Gothic New", sans-serif'; g.textAlign = 'right'; g.textBaseline = 'bottom';
+          g.fillText(`深度 ${depthM.toLocaleString()} m`, W - 18, H - 14);
+        },
+        hit(c, n, grade, x, y) { if (grade === 'perfect') f.burst(x, y, f.HUES[n.drop.hue], 0.3, 1.6); },
+        reset() { for (const p of PLANK) p.lit = 0; },
+      };
+    },
+  });
+
+  // ---------------------------------------------------------------------
+  //  08 MALWARE: a computer gets a virus. The glitch / dubstep song from
+  //  the dodge game (150 BPM), played from its recording.
+  //  Chart: square, pixel ripples; a loading spinner to ride while the
+  //  modem dials; the infection spreads, each new ring starting where the
+  //  last note was struck; rings that teleport; stutters that hit one spot
+  //  in a burst; rings that rewind; a tape stop into the blue screen;
+  //  a format that marches across the screen; and a shutdown.
+  //  Scene: a terminal with scrolling hex, a boot log, error windows,
+  //  spreading red pixels, glitches that tear the screen, a blue screen,
+  //  a format bar, and a CRT switching off.
+  // ---------------------------------------------------------------------
+  // the song's own score (beats), written out by the composing program of the dodge game
+  const SCORE_MALWARE = {
+    kick: [16,18.5,20,22.5,24,26.5,28,30.5,32,33.5,34.75,36,37.5,38.75,40,41.5,42.75,44,45.5,46.75,48,49.5,50.75,52,53.5,54.75,56,57.5,58.75,60,61.5,62.75,64,65.5,66.75,68,69.5,70.75,72,73.5,74.75,76,77.5,78.75,80,84,88,92,96,97.75,100,101.75,103.25,103.5,104,105.75,108,109.75,111.25,111.5,112,113.75,116,117.75,119.25,119.5,120,121.75,124,125.75,127.25,127.5,128,129.75,132,133.75,135.25,135.5,136,137.75,140,141.75,143.25,143.5,144,145.75,148,149.75,151.25,151.5,152,153.75,156,157.75,159.25,159.5,176,180,183.5,184,188,191.5,192,194,196,198,200,202,204,206,208,209.75,212,213.75,215.25,215.5,216,217.75,220,221.75,223.25,223.5,224,225.75,228,229.75,231.25,231.5,232,233.75,236,237.75,239.25,239.5,240,241.75,244,245.75,247.25,247.5,248,249.75,252,253.75,255.25,255.5,256,257.75,260,261.75,263.25,263.5,264,265.75,268,269.75,271.25,271.5,272,272.5,273,273.5,274,274.5,275,275.5,276,276.5,277,277.5,278,278.5,279,279.5,280,280.5,281,281.5,282,282.5,283,283.5,284,284.5,285,285.5,286,286.5,287,287.5],
+    snare: [31,31.5,33,35,37,39,41,43,45,47,49,51,53,55,57,59,61,63,65,67,69,71,73,75,77,79,80,81,82,83,84,84.5,85,85.5,86,86.5,87,87.5,88,88.25,88.5,88.75,89,89.25,89.5,89.75,90,90.25,90.5,90.75,91,91.25,91.5,91.75,92,92.125,92.25,92.375,92.5,92.625,92.75,92.875,93,93.125,93.25,93.375,93.5,93.625,93.75,93.875,94,94.125,94.25,94.375,94.5,94.625,94.75,94.875,95,95.125,95.25,95.375,95.5,95.625,95.75,95.875,98,102,106,110,114,118,122,126,130,134,138,142,146,150,154,158,178,182,186,190,192,192.5,193,193.5,194,194.5,195,195.5,196,196.5,197,197.5,198,198.5,199,199.5,200,200.25,200.5,200.75,201,201.25,201.5,201.75,202,202.25,202.5,202.75,203,203.25,203.5,203.75,204,204.125,204.25,204.375,204.5,204.625,204.75,204.875,205,205.125,205.25,205.375,205.5,205.625,205.75,205.875,206,206.125,206.25,206.375,206.5,206.625,206.75,206.875,207,207.125,207.25,207.375,207.5,207.625,207.75,207.875,210,214,218,222,226,230,234,238,242,246,250,254,258,262,266,270,273,275,277,279,281,283,285,287],
+    impact: [96,208,272],
+    beep: [15,17,19,21,23,25,27,29,30,31,31.5,39.5,47.5,55.5,63.5,71.5,79.5,167,175,183,191,292],
+    glitch: [[47.5,0.5],[63.5,0.5],[79.5,0.5],[95,1],[103.5,0.5],[111.5,0.5],[119.5,0.5],[127,1],[135.5,0.5],[143.5,0.5],[151.5,0.5],[159,1],[206,2],[211.5,0.5],[215.5,0.5],[219.5,0.5],[223,1],[227.5,0.5],[231.5,0.5],[235.5,0.5],[239,1],[243.5,0.5],[247.5,0.5],[251.5,0.5],[255,1],[259.5,0.5],[263.5,0.5],[267.5,0.5],[271,1],[272.75,0.25],[273.75,0.25],[274.75,0.25],[275.75,0.25],[276.75,0.25],[277.75,0.25],[278.75,0.25],[279.75,0.25],[280.75,0.25],[281.75,0.25],[282.75,0.25],[283.75,0.25],[284.75,0.25],[285.75,0.25],[286.75,0.25],[287.75,0.25]],
+    melA: [[32,1],[33,1],[34,1],[35,0.5],[35.5,0.5],[36,2],[38,1],[39,1],[40,1],[41,1],[42,1],[43,1],[44,1],[45,1],[46,1],[47,1],[48,1],[49,1],[50,1],[51,0.5],[51.5,0.5],[52,2],[54,1],[55,1],[56,1],[57,1],[58,1],[59,1],[60,1],[61,1],[62,1],[63,1],[64,1],[65,1],[66,1],[67,0.5],[67.5,0.5],[68,2],[70,1],[71,1],[72,1],[73,1],[74,1],[75,0.5],[75.5,0.5],[76,1],[77,1],[78,2]],
+    drop1: [[96,0.5],[96.5,0.5],[97.5,0.5],[98,0.5],[99,0.5],[99.5,0.5],[100,1],[101,1],[102,0.5],[103,0.5],[103.5,0.5],[104,0.5],[105,0.5],[106,0.5],[106.5,0.5],[107,0.5],[107.5,0.5],[108,1],[109,1],[110,0.5],[111,0.5],[112,0.5],[112.5,0.5],[113.5,0.5],[114,0.5],[115,0.5],[115.5,0.5],[116,1],[117,1],[118,0.5],[119,0.5],[119.5,0.5],[120,0.5],[121,0.5],[122,0.5],[122.5,0.5],[123,0.5],[123.5,0.5],[124,1],[125,1],[126,0.5],[127,0.5],[128,0.5],[128.5,0.5],[129.5,0.5],[130,0.5],[131,0.5],[131.5,0.5],[132,1],[133,1],[134,0.5],[135,0.5],[135.5,0.5],[136,0.5],[137,0.5],[138,0.5],[138.5,0.5],[139,0.5],[139.5,0.5],[140,1],[141,1],[142,0.5],[143,0.5],[144,0.5],[144.5,0.5],[145.5,0.5],[146,0.5],[147,0.5],[147.5,0.5],[148,1],[149,1],[150,0.5],[151,0.5],[151.5,0.5],[152,0.5],[153,0.5],[154,0.5],[154.5,0.5],[155,0.5],[155.5,0.5],[156,2],[158,1],[159,1]],
+    drop2: [[208,0.5],[208.5,0.5],[209.5,0.5],[210,0.5],[211,0.5],[211.5,0.5],[212,1],[213,1],[214,0.5],[215,0.5],[215.5,0.5],[216,0.5],[217,0.5],[218,0.5],[218.5,0.5],[219,0.5],[219.5,0.5],[220,1],[221,1],[222,0.5],[223,0.5],[224,0.5],[224.5,0.5],[225.5,0.5],[226,0.5],[227,0.5],[227.5,0.5],[228,1],[229,1],[230,0.5],[231,0.5],[231.5,0.5],[232,0.5],[233,0.5],[234,0.5],[234.5,0.5],[235,0.5],[235.5,0.5],[236,1],[237,1],[238,0.5],[239,0.5],[240,0.5],[240.5,0.5],[241.5,0.5],[242,0.5],[243,0.5],[243.5,0.5],[244,1],[245,1],[246,0.5],[247,0.5],[247.5,0.5],[248,0.5],[249,0.5],[250,0.5],[250.5,0.5],[251,0.5],[251.5,0.5],[252,2],[254,1],[255,1],[256,0.5],[256.5,0.5],[257.5,0.5],[258,0.5],[259,0.5],[259.5,0.5],[260,1],[261,1],[262,0.5],[263,0.5],[263.5,0.5],[264,0.5],[265,0.5],[266,0.5],[266.5,0.5],[267,0.5],[267.5,0.5],[268,1],[269,1],[270,0.5],[271,0.5]],
+    final: [[272,0.5],[273,0.5],[274,0.5],[275,0.5],[276,0.5],[277,0.5],[278,0.5],[279,0.5],[280,0.5],[281,0.5],[282,0.5],[283,0.5],[284,1],[285,1],[286,2]],
+  };
+  const MALWARE_INFECT = []; // where the infection has spread: { beat, x, y }
+  rippleSong({
+    id: 'malware', title: 'MALWARE', jp: '感染', genre: 'Glitch / Dubstep', level: 8,
+    lede: 'コンピューターがウイルスに侵される曲。波紋は<strong>四角いピクセル</strong>。感染は叩いたノーツから次の波紋へ広がり、波紋は<strong>瞬間移動</strong>し、<strong>巻き戻り</strong>、同じ点を連打させます。テープが止まるとブルースクリーンへ。',
+    theme: { ink: '#020805', ink2: '#0a1f14', panel: 'rgba(2, 8, 5, 0.9)', paper: '#e6ffe9', muted: '#7fa88a', accent: '#ffe14a' },
+    hues: ['#39ff6a', '#ff3b5c', '#36d6ff', '#ffe14a'],
+    bpm: 150, bars: 74, speed: 0.11, ring: { sides: 4, rot: 45 }, attractFromBar: 24,
+    audioFile: { src: 'audio/malware.mp3', t0: 0.5 },
+    pulse: kickPulse(SCORE_MALWARE.kick),
+    sections: [
+      { bar: 0, name: 'BOOT', hue: 0 }, { bar: 8, name: 'INFECTION', hue: 1 }, { bar: 20, name: 'BUILD', hue: 3 },
+      { bar: 24, name: 'DROP', hue: 1 }, { bar: 40, name: 'BLUE SCREEN', hue: 2 }, { bar: 48, name: 'REBOOT', hue: 0 },
+      { bar: 52, name: 'DROP 2', hue: 1 }, { bar: 68, name: 'FORMAT', hue: 3 }, { bar: 72, name: 'SHUTDOWN', hue: 2 },
+    ],
+    chords: [{}],
+    chart({ drop, skip, pulse, tip }) {
+      const GR = 0, RD = 1, CY = 2, YE = 3;
+      const pat = (land, notes) => {
+        const a = [];
+        for (const n of notes) {
+          const [b, l = 0, kind = 'H'] = [].concat(n), i = Math.round((b - land) * 2);
+          while (a.length <= i + l * 2) a.push('.');
+          a[i] = l ? kind : 'o';
+          for (let k = 1; k < l * 2; k++) a[i + k] = '-';
+        }
+        return a.join('');
+      };
+      const toward = ([x, y], tilt = 0) => Math.atan2(-y, -x) / DEG + tilt;
+      const clampP = ([x, y]) => [Math.max(-0.5, Math.min(0.5, x)), Math.max(-0.28, Math.min(0.28, y))];
+      const rnd = mulberry32(404);
+      const inRange = (list, a, b) => list.filter(([x]) => x >= a && x < b);
+      // notes of a melody in [a, b): 8ths stay taps, notes of two beats or more become holds
+      const notesOf = (list, a, b, skipSet = []) => inRange(list, a, b).filter(([x]) => !skipSet.some(([s, e]) => x >= s && x < e)).map(([x, l]) => (l >= 2 ? [x, 1.5] : x));
+
+      // BOOT: the modem dials while a loading spinner turns; then the error beeps, typed out line by line
+      drop(3, [0, 0], CY, pat(3, [[4, 9, 'S']]), { a: -90, speed: 0.004, r0: 0.13, spin: 720 });
+      const beeps = SCORE_MALWARE.beep.filter((b) => b < 32);
+      const f_bootDrops = [];
+      let row = 0;
+      for (let i = 0; i < beeps.length; i++) {
+        const b = beeps[i], next = beeps[i + 1];
+        if (next !== undefined && next - b < 1) { f_bootDrops.push(drop(b - 1, [-0.45 + (row % 5) * 0.22, -0.22 + Math.floor(row / 5) * 0.2], GR, pat(b - 1, [b, next]), { a: 0, turn: 0 })); i++; }
+        else f_bootDrops.push(drop(b - 1, [-0.45 + (row % 5) * 0.22, -0.22 + Math.floor(row / 5) * 0.2], row % 4 === 3 ? RD : GR, pat(b - 1, [b]), { a: 90 }));
+        row++;
+      }
+      // Every segment below starts next to the last note played, so the hand can follow
+      // the virus around the screen. `cur` is the last note: { beat, p }.
+      let cur = null;
+      const lastOf = (d) => { const t = tip(d, -1); return { beat: t.beat, p: t.p }; };
+      const later = (c) => { if (!cur || c.beat >= cur.beat) cur = c; };
+      const played = []; // every note placed so far: { beat, p }
+      const track = (d) => { d.notes.forEach((_, i) => played.push(tip(d, i))); later(lastOf(d)); return d; };
+      // a centre for a ring whose first note, `R` out along angle a, lands near `target`
+      const centreFor = (target, R, a) => [target[0] - Math.cos(a * DEG) * R, target[1] - Math.sin(a * DEG) * R];
+      // a step away from `from`, in whichever of six directions is clearest of the notes just played
+      const step = (from, dist) => {
+        const near = played.filter((n) => n.beat > cur.beat - 3);
+        let best = null, bd = -1;
+        const a0 = rnd() * TAU;
+        for (let k = 0; k < 6; k++) {
+          const a = a0 + (k * TAU) / 6, q = clampP([from[0] + Math.cos(a) * dist, from[1] + Math.sin(a) * dist]);
+          const dmin = Math.min(9, ...near.map((n) => Math.hypot(q[0] - n.p[0], q[1] - n.p[1])));
+          if (dmin > bd) { bd = dmin; best = q; }
+        }
+        return best;
+      };
+      const outward = (p) => Math.atan2(p[1], p[0]) / DEG;
+      // glitches claim their beats: a stutter takes the half beat after each
+      const STUT = SCORE_MALWARE.glitch.filter(([, l]) => l === 0.5).map(([b]) => b);
+      const EXCL = [...STUT.map((b) => [b - 0.01, b + 0.6]), [270.99, 272]];
+      const stutter = (b, hue = RD) => {
+        const target = step(cur.p, 0.16), a = outward(target) + 180;
+        track(pulse(b - 1, centreFor(target, 0.11, a), hue, { a, off: 1, n: 3, gap: 0.25 }));
+      };
+      // INFECTION: the virus spreads: every ring starts where the last note was struck
+      const infect = (list, from, to, hues) => {
+        let k = 0;
+        for (let w = from; w < to; w += 2) {
+          const ns = notesOf(list, w, w + 2, EXCL);
+          if (!ns.length) continue;
+          const first = [].concat(ns[0])[0], land = Math.min(first - 0.5, Math.max(cur.beat, first - 1.5)), p = clampP(cur.p);
+          // the new ring's first note heads whichever way is clearest of the notes just played
+          const R1 = 0.07 + 0.11 * (first - land), near = played.filter((n) => n.beat > cur.beat - 3);
+          let away = 0, bd = -1;
+          for (let q = 0; q < 12; q++) {
+            const a = q * 30, x = p[0] + Math.cos(a * DEG) * R1, y = p[1] + Math.sin(a * DEG) * R1;
+            if (Math.abs(x) > 0.7 || Math.abs(y) > 0.4) continue;
+            const dm = Math.min(9, ...near.map((n) => Math.hypot(x - n.p[0], y - n.p[1])));
+            if (dm > bd) { bd = dm; away = a; }
+          }
+          const d = drop(land, p, hues[k % hues.length], pat(land, ns), { a: away, turn: k % 2 ? 40 : -40, r0: 0.07 });
+          MALWARE_INFECT.push({ beat: land, x: p[0], y: p[1] });
+          track(d); k++;
+        }
+      };
+      // a ring that cannot keep still: it teleports just before every note
+      const tele = (hue, notes, span = 0.3) => {
+        const first = [].concat(notes[0])[0], land = first - 1;
+        let c = step(cur.p, 0.12);
+        const c0 = c, path = [];
+        notes.forEach((n, i) => {
+          const b = [].concat(n)[0];
+          if (i) c = step(c, span);
+          path.push([b - land - 0.4, c[0], c[1]]);
+          played.push({ beat: cur.beat, p: c }); // keep the next jumps clear of this one
+        });
+        track(drop(land, c0, hue, pat(land, notes), { path, ease: 'step', speed: 0.03, r0: 0.12, a: -90, turn: 90 }));
+      };
+      // a rewind: the ring runs backwards, its first note at the outside
+      const rewind = (hue, notes, r0 = 0.5, speed = -0.12) => {
+        const first = [].concat(notes[0])[0], land = first - 0.5, target = step(cur.p, 0.15), a = outward(target);
+        track(drop(land, centreFor(target, r0 + speed * 0.5, a), hue, pat(land, notes), { speed, r0, a, turn: 45 }));
+      };
+      // a tape stop: the ring slows to a halt and its notes bunch up
+      const tapeStop = (hue, notes) => {
+        const first = [].concat(notes[0])[0], land = first - 1, target = step(cur.p, 0.15), a = outward(target) + 180;
+        track(drop(land, centreFor(target, 0.175, a), hue, pat(land, notes), { speed: 0.2, accel: -0.05, a, turn: 40 }));
+      };
+      cur = { beat: 31.5, p: [0, 0] };
+      for (const d of f_bootDrops) track(d);
+      infect(SCORE_MALWARE.melA, 32, 48, [GR, GR, RD, GR]);
+      stutter(47.5);
+      infect(SCORE_MALWARE.melA, 48, 64, [RD, GR, RD, RD]);
+      stutter(63.5);
+      infect(SCORE_MALWARE.melA, 64, 80, [RD, RD, GR, RD]);
+      // BUILD: teleporting rings, then a rewind into the drop
+      tele(YE, [81, 82, 83, 84, 85, 86, 87, 88]);
+      tele(YE, [89, 90, 91, 92, 93, 93.5, 94, 94.5], 0.2);
+      rewind(RD, [95.5], 0.4, -0.16);
+      // DROP: four-bar blocks: two bars of infection, a teleporting bar, a rewinding bar with a stutter
+      const block = (list, b0, hues, stop = false) => {
+        infect(list, b0, b0 + 8, hues);
+        const tn = notesOf(list, b0 + 8, b0 + 12, EXCL);
+        if (tn.length) tele(hues[1], tn, 0.22);
+        const st = STUT.find((g) => g >= b0 + 12 && g < b0 + 16);
+        const tail = notesOf(list, b0 + 12, b0 + 16, EXCL);
+        if (tail.length) (stop ? tapeStop : rewind)(stop ? CY : hues[0], tail);
+        if (st !== undefined) stutter(st);
+      };
+      for (let b = 96; b < 160; b += 16) block(SCORE_MALWARE.drop1, b, [RD, GR, CY], b === 144);
+      // BLUE SCREEN: progress bars to ride, and the beeps
+      for (let j = 0; j < 4; j++) {
+        const b = 160 + j * 8, p = [-0.4 + j * 0.27, j % 2 ? 0.12 : -0.12];
+        drop(b, p, CY, pat(b, [b + 1, b + 2, b + 3]), { a: 0, turn: 0 });
+        drop(b + 3, [p[0], -p[1]], GR, pat(b + 3, [[b + 4, 2]]), { a: 0, speed: 0.1 });
+        drop(b + 6, [p[0] + 0.3, 0], YE, pat(b + 6, [b + 7]), { a: 0 });
+      }
+      // REBOOT: data packets skip across, faster and faster
+      skip(192, [0.55, 0.25], [-0.6, -0.25], GR, 'o.o.o.o.');
+      skip(196, [-0.65, 0.3], [0.6, -0.25], CY, 'o.o.o.o.');
+      skip(200, [0.65, 0.3], [-0.6, -0.25], GR, 'o.o.oooo');
+      skip(204, [-0.45, -0.05], [0.2, 0.25], CY, 'oooo', { decay: 0.95 });
+      cur = { beat: 205.5, p: [0.2, 0.25] };
+      // DROP 2: the blocks again, a step higher and more infected
+      for (let b = 208; b < 272; b += 16) block(SCORE_MALWARE.drop2, b, [RD, RD, YE]);
+      // FORMAT: the drive is wiped cell by cell, left to right
+      SCORE_MALWARE.final.forEach(([b, l], i) => {
+        const x = -0.6 + i * 0.085, y = i % 2 ? 0.14 : -0.14;
+        drop(b - 1, [x, y], i % 3 === 2 ? RD : YE, pat(b - 1, [l >= 2 ? [b, 1.5] : b]), { a: y < 0 ? 90 : -90, speed: 0.1 });
+      });
+      // SHUTDOWN: one last ring collapses into the middle with the final beep
+      drop(289, [0, 0], CY, pat(289, [292]), { speed: -0.12, r0: 0.45, a: -90 });
+    },
+    song: { arrange() {} },
+    scene(kit, f) {
+      const { g, rgba, hex, hash, TAU } = kit;
+      const GREEN = hex('#39ff6a'), RED = hex('#ff3b5c'), BLUE = hex('#1546c8'), WHITE = hex('#ffffff'), BLACK = [0, 0, 0];
+      const GL = SCORE_MALWARE.glitch, BEEPS = SCORE_MALWARE.beep;
+      const LOG = ['MINAMO BIOS v1.0  (C) 1996', 'CPU: RIPPLE-486 DX2 66MHz', 'Memory test: 640K OK', 'Detecting drives... C:\\ OK', 'Loading WATER.SYS ...', 'Dialing 555-0199 ...', 'CONNECT 56000', 'Downloading update.exe ...', '!! unknown process: wav.exe', '!! unknown process: wav.exe'];
+      const glitchAt = (beat) => GL.find(([b, l]) => beat >= b && beat < b + l);
+      const mono = (px) => `${px}px ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace`;
+      let bsod = 0;
+      return {
+        back(c) {
+          const { W, H, F } = f;
+          const name = c.sec.name;
+          bsod += ((name === 'BLUE SCREEN' ? 1 : 0) - bsod) * Math.min(1, c.dt * 6);
+          if (bsod > 0.01) { g.fillStyle = rgba(BLUE, bsod); g.fillRect(-20, -20, W + 40, H + 40); }
+          // scrolling hex in the background
+          g.font = mono(12); g.textAlign = 'left'; g.textBaseline = 'top';
+          const rowH = 16, scroll = (c.now * (name.startsWith('DROP') ? 60 : 22)) % rowH, cols = Math.ceil(W / 220);
+          for (let r = -1; r < H / rowH + 1; r++) {
+            const line = Math.floor(c.now * (name.startsWith('DROP') ? 60 : 22) / rowH) + r;
+            for (let k = 0; k < cols; k++) {
+              const h = hash(line * 31 + k * 7);
+              g.fillStyle = rgba(bsod > 0.5 ? WHITE : h > 0.93 ? RED : GREEN, 0.05 + (h > 0.97 ? 0.08 : 0));
+              let s = `${(line * 16 + k * 4096).toString(16).padStart(6, '0')}  `;
+              for (let q = 0; q < 6; q++) s += Math.floor(hash(line * 13 + k * 5 + q) * 256).toString(16).padStart(2, '0') + ' ';
+              g.fillText(s, k * 220 + 10, r * rowH - scroll);
+            }
+          }
+          // the boot log, typed out
+          if (name === 'BOOT' || name === 'REBOOT') {
+            const t0 = name === 'BOOT' ? 0 : 192, lines = name === 'BOOT' ? LOG : LOG.slice(0, 5).concat(['Restoring from backup ...', 'Backup infected.']);
+            const per = name === 'BOOT' ? 3.2 : 2.2, shown = (c.beat - t0) / per;
+            g.font = mono(14); g.fillStyle = rgba(GREEN, 0.6);
+            lines.forEach((l, i) => { if (shown < i) return; const chars = Math.floor(Math.min(1, shown - i) * l.length); g.fillStyle = rgba(l.startsWith('!!') ? RED : GREEN, 0.55); g.fillText(l.slice(0, chars), 24, 70 + i * 20); });
+            if (name === 'BOOT' && c.beat < 14) {
+              // the modem's progress bar
+              const u = Math.min(1, c.beat / 14), bx = 24, by = 70 + 11 * 20;
+              g.strokeStyle = rgba(GREEN, 0.5); g.strokeRect(bx, by, 220, 10);
+              g.fillStyle = rgba(GREEN, 0.5); g.fillRect(bx + 2, by + 2, 216 * u, 6);
+            }
+          }
+          // the infection: red pixels breeding where the virus spread
+          if (c.beat > 32 && name !== 'BLUE SCREEN' && name !== 'REBOOT') {
+            const s = Math.max(3, F.u * 0.012);
+            for (const v of MALWARE_INFECT) {
+              const age = c.beat - v.beat;
+              if (age < 0) continue;
+              const n = Math.min(40, Math.floor(age * 1.5));
+              const [cx, cy] = f.toScreen(v.x, v.y);
+              for (let i = 0; i < n; i++) {
+                const a = hash(v.beat * 7 + i) * TAU, r = Math.sqrt(i) * s * 1.6;
+                g.fillStyle = rgba(RED, 0.1 + 0.15 * hash(i + v.beat));
+                g.fillRect(Math.round((cx + Math.cos(a) * r) / s) * s, Math.round((cy + Math.sin(a) * r) / s) * s, s, s);
+              }
+            }
+          }
+          // the blue screen
+          if (bsod > 0.3) {
+            g.globalAlpha = bsod;
+            g.fillStyle = rgba(WHITE, 0.9); g.textAlign = 'left'; g.textBaseline = 'top';
+            g.font = `${Math.round(Math.min(110, W * 0.12))}px "Zen Kaku Gothic New", sans-serif`;
+            g.fillText(':(', W * 0.08, H * 0.12);
+            g.font = `700 ${Math.round(Math.max(13, Math.min(18, W * 0.035)))}px "Zen Kaku Gothic New", sans-serif`;
+            const msg = '問題が発生したため、水面を再起動する必要があります。', ty = H * 0.12 + Math.min(130, W * 0.14);
+            if (g.measureText(msg).width > W * 0.84) { const [a1, a2] = msg.split('、'); g.fillText(`${a1}、`, W * 0.08, ty - 12); g.fillText(a2, W * 0.08, ty + 12); }
+            else g.fillText(msg, W * 0.08, ty);
+            const pct = Math.max(0, Math.min(100, Math.round(((c.beat - 160) / 32) * 100)));
+            g.font = '700 16px "Zen Kaku Gothic New", sans-serif';
+            g.fillText(`${pct}% 完了`, W * 0.08, H * 0.12 + Math.min(130, W * 0.14) + 36);
+            g.font = mono(12); g.fillStyle = rgba(WHITE, 0.6);
+            g.fillText('STOP CODE: RIPPLE_OVERFLOW (0x000000FA)', W * 0.08, H * 0.88);
+            g.globalAlpha = 1;
+          }
+          // the format bar
+          if (name === 'FORMAT' || name === 'SHUTDOWN') {
+            const u = Math.max(0, Math.min(1, (c.beat - 272) / 15));
+            g.font = mono(14); g.fillStyle = rgba(hex('#ffe14a'), 0.8); g.textAlign = 'left'; g.textBaseline = 'top';
+            g.fillText(`FORMAT C:\\  ${Math.round(u * 100)}%`, 24, 70);
+            g.strokeStyle = rgba(hex('#ffe14a'), 0.6); g.strokeRect(24, 92, W - 48, 10);
+            g.fillStyle = rgba(hex('#ffe14a'), 0.6); g.fillRect(26, 94, (W - 52) * u, 6);
+            // the screen is wiped cell by cell behind the bar
+            const cs = Math.max(24, W / 30);
+            for (let x = 0; x < W * u; x += cs) for (let y = 110; y < H; y += cs) if (hash(Math.floor(x / cs) * 91 + Math.floor(y / cs)) < u * 1.2) { g.fillStyle = 'rgba(0,0,0,0.55)'; g.fillRect(x, y, cs - 1, cs - 1); }
+          }
+        },
+        surface(c) {
+          // error windows at each beep
+          for (const b of BEEPS) {
+            const age = c.beat - b;
+            if (age < 0) break;
+            if (age > 2) continue;
+            const a = Math.min(1, age * 8) * Math.min(1, (2 - age) * 2);
+            const x = 40 + hash(b * 13) * (f.W - 300), y = 60 + hash(b * 17) * (f.H - 200), w = 240, h = 90;
+            g.globalAlpha = a * 0.8;
+            g.fillStyle = 'rgba(20,20,24,0.92)'; g.fillRect(x, y, w, h);
+            g.fillStyle = rgba(RED, 0.9); g.fillRect(x, y, w, 20);
+            g.strokeStyle = rgba(WHITE, 0.4); g.strokeRect(x + 0.5, y + 0.5, w, h);
+            g.fillStyle = rgba(WHITE, 0.95); g.font = mono(12); g.textAlign = 'left'; g.textBaseline = 'top';
+            g.fillText('ERROR', x + 8, y + 4);
+            g.fillText(`0x${Math.floor(hash(b) * 0xffffff).toString(16).toUpperCase().padStart(6, '0')}`, x + 12, y + 32);
+            g.fillText(['wav.exe has stopped', 'ripple overflow', 'unknown note'][Math.floor(hash(b * 3) * 3)], x + 12, y + 54);
+            g.globalAlpha = 1;
+          }
+        },
+        front(c) {
+          const { W, H } = f;
+          // scanlines
+          g.fillStyle = 'rgba(0,0,0,0.12)';
+          for (let y = 0; y < H; y += 3) g.fillRect(0, y, W, 1);
+          // the drops shake on every kick
+          if (c.sec.name.startsWith('DROP') && c.pulse > 0.9) f.shake(5);
+        },
+        // glitches tear the screen: slices slide sideways and the colours split
+        post(c) {
+          if (c.beat > 293) {
+            // the CRT switches off: the picture squeezes to a line, then to a dot
+            const u = Math.min(1, (c.beat - 293) / 2), { W, H } = f;
+            g.fillStyle = rgba(BLACK, Math.min(1, u * 3)); g.fillRect(0, 0, W, H);
+            const lw = W * (u < 0.6 ? 1 : 1 - (u - 0.6) / 0.4), lh = Math.max(2, H * 0.3 * (1 - u * 3));
+            g.fillStyle = rgba(WHITE, u < 0.95 ? 0.9 : 0);
+            g.fillRect(W / 2 - lw / 2, H / 2 - lh / 2, lw, lh);
+            return;
+          }
+          const gl = glitchAt(c.beat), drop2 = c.sec.name === 'DROP 2';
+          const tele = f.DROPS.some((d) => d.path && d.ease === 'step' && d.path.some(([o]) => Math.abs(c.beat - (d.beat + o)) < 0.08));
+          if (!(gl || tele || (drop2 && c.pulse > 0.85 && Math.floor(c.beat) % 4 === 0)) || kit.reduceMotion) return;
+          const cv2 = g.canvas, dpr = cv2.width / f.W;
+          g.save(); g.setTransform(1, 0, 0, 1, 0, 0);
+          const strips = gl ? 7 : 4;
+          for (let i = 0; i < strips; i++) {
+            const y = Math.floor(Math.random() * cv2.height), h = Math.floor((8 + Math.random() * 40) * dpr), dx = Math.floor((Math.random() - 0.5) * 60 * dpr);
+            try { g.drawImage(cv2, 0, y, cv2.width, h, dx, y, cv2.width, h); } catch (e) { /* canvas not ready */ }
+          }
+          g.globalCompositeOperation = 'lighter'; g.globalAlpha = 0.25;
+          try { g.drawImage(cv2, 4 * dpr, 0); } catch (e) { /* ignore */ }
+          g.restore();
+          if (drop2 && !gl && !tele) { g.save(); g.globalCompositeOperation = 'difference'; g.fillStyle = 'rgba(255,255,255,0.85)'; g.fillRect(0, 0, f.W, f.H); g.restore(); }
+        },
+        hit(c, n, grade, x, y) {
+          if (grade === 'miss') return;
+          if (n.jack) f.burst(x, y, RED, 0.4, 0.8);
+          else if (grade === 'perfect') f.burst(x, y, f.HUES[n.drop.hue], 0.3, 1.2);
+        },
+        reset() { bsod = 0; },
+        layout() {},
       };
     },
   });

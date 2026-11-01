@@ -103,6 +103,10 @@
 
   @media (min-width: 900px) {
     .panel-wrap { align-items: center; padding-left: max(48px, env(safe-area-inset-left, 0px)); }
+    /* keep the whole song list on one screen */
+    #menuWrap .panel { gap: 12px; }
+    .songs { gap: 6px; }
+    .song-card { padding: 7px 12px; }
   }
   @media (max-height: 700px) and (max-width: 899px) {
     #titleWrap .lede, #titleWrap .how, #menuWrap .lede { display: none; }
@@ -140,6 +144,7 @@
       <li><b>スマホ</b><span>ノーツを直接タップ</span></li>
       <li><b>長押し</b><span>波紋と一緒に動く光を、押したまま追いかける</span></li>
       <li><b>水切り</b><span>跳ねてくる石が着水する点を叩く</span></li>
+      <li><b>交点</b><span>二つの波紋が交わる点。<kbd>Z</kbd> <kbd>X</kbd> を同時に（クリックとキーでも）、スマホは二本指で同時にタップ</span></li>
     </ul>
     <div class="settings">
       <div class="row">
@@ -266,6 +271,7 @@
   }
 
   // ===== Judging =====
+  const DOUBLE = 0.12; // how close together the two presses of a crossing note must be
   const gradeOf = (adt) => (adt <= WIN.perfect ? 'perfect' : adt <= WIN.great ? 'great' : 'good');
 
   function newRun(auto, attract) {
@@ -296,6 +302,14 @@
       if (n.head || !M.hitTest(n, p.x, p.y)) continue;
       const dt = now - n.t;
       if (Math.abs(dt) > WIN.good) continue;
+      if (n.need === 2) {
+        // a crossing note takes two presses together (two keys, a key and a click, or two fingers)
+        if (n.pressTok === undefined || n.pressTok === token || now - n.pressAt > DOUBLE) { n.pressTok = token; n.pressAt = now; return true; }
+        n.head = gradeOf(Math.max(Math.abs(dt), Math.abs(n.pressAt - n.t)));
+        judge(n, n.head, now);
+        if (!S.attract && !S.auto) audio.tick();
+        return true;
+      }
       n.head = gradeOf(Math.abs(dt));
       judge(n, n.head, now);
       if (!S.attract && !S.auto) audio.tick();
@@ -324,6 +338,8 @@
         n.head = 'perfect'; judge(n, 'perfect', now);
         if (n.dur > 0) n.holding = 'auto';
       }
+      // only one press reached a crossing note: it counts, but only as GOOD
+      if (n.need === 2 && !n.head && n.pressTok !== undefined && now - n.pressAt > DOUBLE) { n.head = 'good'; judge(n, 'good', now); }
       if (!n.head && now - n.t > WIN.good) {
         n.head = 'miss'; judge(n, 'miss', now);
         if (n.dur > 0) { n.tail = 'miss'; judge(n, 'miss', now); }
@@ -347,10 +363,11 @@
   // ===== Audio =====
   // A shared synth kit; each song adds its own voices and arrangement (see song.song).
   const audio = (() => {
-    let ac = null, master = null, noise = null, reverbIn = null, out = null, bus = null, padV = 0.85;
+    let ac = null, master = null, noise = null, reverbIn = null, out = null, bus = null, padV = 0.85, clipSrc = null;
     const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
 
     function init() {
+      if (ac) return;
       ac = new (window.AudioContext || window.webkitAudioContext)();
       const comp = ac.createDynamicsCompressor();
       comp.threshold.value = -14; comp.ratio.value = 4; comp.attack.value = 0.004; comp.release.value = 0.2;
@@ -474,7 +491,7 @@
           o.connect(f);
         }
       },
-      lead(at, midi, dur) { M.song.lead(A, at, midi, dur); },
+      lead(at, midi, dur) { if (M.song.lead) M.song.lead(A, at, midi, dur); },
     };
 
     // Arrangement -> time-sorted events (song seconds).
@@ -487,9 +504,22 @@
         M.song.arrange(add, bar, b0, ch, name);
       }
       if (M.song.extra) M.song.extra(add);
-      for (const n of M.chart) { const m = M.song.leadMidi(n); if (m != null) add(n.beat, 'lead', m, n.dur); }
+      if (M.song.leadMidi) for (const n of M.chart) { const m = M.song.leadMidi(n); if (m != null) add(n.beat, 'lead', m, n.dur); }
       ev.sort((a, b) => a.t - b.t);
       return ev;
+    }
+
+    // Songs recorded as audio files: fetched and decoded once (an AudioContext may decode before any gesture).
+    const clips = new Map();
+    function loadClip(m) {
+      if (!m.audioFile) return Promise.resolve(null);
+      if (!clips.has(m.id)) {
+        init();
+        clips.set(m.id, fetch(m.audioFile.src).then((r) => { if (!r.ok) throw new Error(`${r.status}`); return r.arrayBuffer(); })
+          .then((b) => new Promise((ok, no) => ac.decodeAudioData(b, ok, no)))
+          .catch((e) => { clips.delete(m.id); throw e; }));
+      }
+      return clips.get(m.id);
     }
 
     let song = [], idx = 0, start = 0, running = false;
@@ -522,19 +552,29 @@
     }
 
     return {
+      loadClip,
       async start() {
-        if (!ac) init();
+        init();
         if (ac.state !== 'running') await ac.resume();
+        const clip = await loadClip(M);
         lastSong = -Infinity;
         newRun(M.song);
         song = buildSong(); idx = 0;
         start = ac.currentTime + 2.2;
         running = true;
+        if (clip) {
+          // the file's beat 0 sits t0 seconds in, so it starts that much before the song clock's zero
+          clipSrc = ac.createBufferSource(); clipSrc.buffer = clip;
+          const g = ac.createGain(); g.gain.value = M.audioFile.gain ?? 0.9;
+          clipSrc.connect(g).connect(out);
+          clipSrc.start(start - M.audioFile.t0);
+        }
         if (M.onAudioStart) M.onAudioStart(A, start);
         pump();
       },
       halt() {
         running = false;
+        if (clipSrc) { try { clipSrc.stop(ac.currentTime + 0.1); } catch (e) { /* not started */ } clipSrc = null; }
         if (out) out.gain.setTargetAtTime(0, ac.currentTime, 0.05);
         for (const m of SONGS) if (m.onAudioStop) m.onAudioStop();
       },
@@ -620,9 +660,20 @@
     menuWrap.hidden = true; titleWrap.hidden = false; resultWrap.hidden = true;
     setHash(M.id);
     $('#startBtn').focus({ preventScroll: true });
+    // start fetching a recorded song while the player reads the title
+    audio.loadClip(M).catch(() => {});
   }
 
   async function startGame() {
+    if (M.audioFile) {
+      const btn = $('#startBtn'), label = btn.textContent;
+      btn.textContent = '読み込み中…'; btn.disabled = true;
+      try { await audio.loadClip(M); } catch (e) {
+        $('#songBest').textContent = '音源を読み込めませんでした。ページをウェブサーバー経由で開いてください。';
+        btn.textContent = label; btn.disabled = false; return;
+      }
+      btn.textContent = label; btn.disabled = false;
+    }
     menuWrap.hidden = true; titleWrap.hidden = true; resultWrap.hidden = true;
     S.screen = 'play';
     M.layout(W, H, false);
@@ -697,7 +748,7 @@
       const no = document.createElement('span'); no.className = 'sc-no'; no.textContent = String(m.no).padStart(2, '0');
       const title = document.createElement('span'); title.className = 'sc-title'; title.textContent = m.title;
       const jp = document.createElement('small'); jp.textContent = m.jp; title.appendChild(jp);
-      const genre = document.createElement('span'); genre.className = 'sc-genre'; genre.textContent = `${m.genre} ・ BPM ${m.bpm}`;
+      const genre = document.createElement('span'); genre.className = 'sc-genre'; genre.textContent = `${m.genre} ・ BPM ${m.bpm}${m.audioFile ? ' ・ 録音' : ''}`;
       const side = document.createElement('span'); side.className = 'sc-side';
       const bl = document.createElement('span'); bl.className = 'sc-best'; bl.textContent = bestLabel(best[m.id]);
       side.append(levelMeter(m.level), bl);
