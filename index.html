@@ -159,7 +159,7 @@
       <li><b>スマホ</b><span>ノーツを直接タップ</span></li>
       <li><b>長押し</b><span>波紋と一緒に動く光を、押したまま追いかける</span></li>
       <li><b>水切り</b><span>跳ねてくる石が着水する点を叩く</span></li>
-      <li><b>交点</b><span>二つの波紋が交わる点。<kbd>Z</kbd> <kbd>X</kbd> を同時に（クリックとキーでも）、スマホは二本指で同時にタップ</span></li>
+      <li><b>交点</b><span>二つの波紋が交わる<strong>2点</strong>を同時に叩く。スマホは二本指で2点を同時にタップ。パソコンはマウスを片方に合わせると反対側に鏡の照準が出るので、<kbd>Z</kbd> <kbd>X</kbd> を同時に（クリックとキーでも）</span></li>
     </ul>
     <label class="check"><input type="checkbox" id="auto"> オートプレイで見る</label>
     <div class="actions">
@@ -335,12 +335,20 @@
   }
 
   // ===== Judging =====
-  const DOUBLE = 0.12; // how close together the two presses of a crossing note must be
+  const DOUBLE = 0.12; // how close together the two presses of a crossing pair must be (mouse and keys)
+  let pendingPair = null; // a crossing pair half struck by mouse or key: { token, at, partner }
   const gradeOf = (adt) => (adt <= WIN.perfect ? 'perfect' : adt <= WIN.great ? 'great' : 'good');
 
   function newRun(auto, attract) {
     byChart.clear();
     S.notes = M.chart.map((c) => { const n = { ...c, src: c, end: c.t + c.dur, head: null, tail: null, holding: null, off: 0 }; byChart.set(c, n); return n; });
+    // the two notes where two rings cross know each other
+    const pairs = new Map();
+    for (const n of S.notes) {
+      if (!n.pair) continue;
+      if (pairs.has(n.pair)) { const m = pairs.get(n.pair); m.partner = n; n.partner = m; } else pairs.set(n.pair, n);
+    }
+    pendingPair = null;
     S.cursor = 0; S.auto = auto; S.attract = attract;
     S.combo = 0; S.maxCombo = 0; S.weight = 0;
     S.counts = { perfect: 0, great: 0, good: 0, miss: 0 };
@@ -358,23 +366,28 @@
   }
 
   // Strike the earliest note under the aim; a hold remembers `token` so its release can end it.
+  // A crossing pair is two notes at the two points where two rings cross, struck together.
+  // Fingers each strike their own point. A mouse can only aim at one, so with mouse and keys the
+  // second press (another key, or the click) strikes the other point, where the mirror aim sits.
+  const pointerToken = (token) => typeof token === 'number';
   function press(token, now) {
     const p = aimOf(token);
+    if (pendingPair && !pointerToken(token) && token !== pendingPair.token && now - pendingPair.at <= DOUBLE && !pendingPair.partner.head) {
+      const n = pendingPair.partner;
+      pendingPair = null;
+      n.head = gradeOf(Math.abs(now - n.t));
+      judge(n, n.head, now);
+      if (!S.attract && !S.auto) audio.tick();
+      return true;
+    }
     for (let i = S.cursor; i < S.notes.length; i++) {
       const n = S.notes[i];
       if (n.t > now + WIN.good) break;
       if (n.head || !M.hitTest(n, p.x, p.y)) continue;
       const dt = now - n.t;
       if (Math.abs(dt) > WIN.good) continue;
-      if (n.need === 2) {
-        // a crossing note takes two presses together (two keys, a key and a click, or two fingers)
-        if (n.pressTok === undefined || n.pressTok === token || now - n.pressAt > DOUBLE) { n.pressTok = token; n.pressAt = now; return true; }
-        n.head = gradeOf(Math.max(Math.abs(dt), Math.abs(n.pressAt - n.t)));
-        judge(n, n.head, now);
-        if (!S.attract && !S.auto) audio.tick();
-        return true;
-      }
       n.head = gradeOf(Math.abs(dt));
+      if (n.partner && !n.partner.head && !pointerToken(token)) pendingPair = { token, at: now, partner: n.partner };
       judge(n, n.head, now);
       if (!S.attract && !S.auto) audio.tick();
       if (n.dur > 0) n.holding = token;
@@ -402,8 +415,6 @@
         n.head = 'perfect'; judge(n, 'perfect', now);
         if (n.dur > 0) n.holding = 'auto';
       }
-      // only one press reached a crossing note: it counts, but only as GOOD
-      if (n.need === 2 && !n.head && n.pressTok !== undefined && now - n.pressAt > DOUBLE) { n.head = 'good'; judge(n, 'good', now); }
       if (!n.head && now - n.t > WIN.good) {
         n.head = 'miss'; judge(n, 'miss', now);
         if (n.dur > 0) { n.tail = 'miss'; judge(n, 'miss', now); }
@@ -619,6 +630,9 @@
     return {
       loadClip,
       async start() {
+        // until this run's start time is set, the song clock must not read the last run's: frames drawn
+        // while the context resumes would otherwise judge the new notes against the old position
+        start = Infinity; lastSong = -Infinity;
         init();
         if (ac.state !== 'running') await ac.resume();
         const clip = await loadClip(M);
@@ -639,6 +653,7 @@
       },
       halt() {
         running = false;
+        start = Infinity; lastSong = -Infinity;
         if (clipSrc) { try { clipSrc.stop(ac.currentTime + 0.1); } catch (e) { /* not started */ } clipSrc = null; }
         if (out) out.gain.setTargetAtTime(0, ac.currentTime, 0.05);
         for (const m of SONGS) if (m.onAudioStop) m.onAudioStop();
@@ -1190,9 +1205,10 @@
         if (!inField(px, py)) console.warn(`${def.id}: pulse at beat ${beat} strikes outside the field`);
         return d;
       }
-      // cross(beat, dropA, dropB, opts): a note where the two rings cross at `beat`; it takes two
-      // presses at once. opts.side (0 or 1) picks which of the two crossings; by default the one in the field.
-      function cross(beat, A, B, o = {}) {
+      // cross(beat, dropA, dropB): two notes at the two points where the rings cross at `beat`,
+      // struck together (a crossing pair). Returns both points.
+      let pairId = 0;
+      function cross(beat, A, B) {
         const oa = beat - A.beat, ob = beat - B.beat;
         const [ax, ay] = ringC(A, oa), [bx, by] = ringC(B, ob), ra = ringR(A, oa), rb = ringR(B, ob);
         const dx = bx - ax, dy = by - ay, dd = Math.hypot(dx, dy);
@@ -1200,10 +1216,13 @@
         const l = (ra * ra - rb * rb + dd * dd) / (2 * dd), h = Math.sqrt(Math.max(0, ra * ra - l * l));
         const mx = ax + (dx * l) / dd, my = ay + (dy * l) / dd;
         const P = [[mx - (dy * h) / dd, my + (dx * h) / dd], [mx + (dy * h) / dd, my - (dx * h) / dd]];
-        const p = o.side !== undefined ? P[o.side] : (inField(...P[0]) && (!inField(...P[1]) || Math.hypot(...P[0]) < Math.hypot(...P[1])) ? P[0] : P[1]);
-        if (!inField(...p)) console.warn(`${def.id}: crossing at beat ${beat} is outside the field`);
-        A.notes.push({ off: oa, offEnd: oa, ang: Math.atan2(p[1] - ay, p[0] - ax), spin: 0, need: 2, cross: B });
-        return p;
+        const id = ++pairId;
+        for (const p of P) {
+          if (!inField(...p)) console.warn(`${def.id}: crossing at beat ${beat} is outside the field`);
+          A.notes.push({ off: oa, offEnd: oa, ang: Math.atan2(p[1] - ay, p[0] - ax), spin: 0, cross: B, pair: id });
+        }
+        if (Math.hypot(P[0][0] - P[1][0], P[0][1] - P[1][1]) < 0.2) console.warn(`${def.id}: the two crossings at beat ${beat} are too close together`);
+        return P;
       }
       // skip(beat, from, to, hue, pattern): a stone skips across the water from `from` towards `to`,
       // landing on each 'o' (8th steps, or opts.step); each landing is a note on the spot it lands.
@@ -1242,7 +1261,7 @@
         if (d.stone) d.stone.t = d.stone.beat * SPB;
         d.notes.forEach((n, i) => {
           const beat = d.beat + n.off;
-          CHART.push({ beat, t: beat * SPB, dur: (n.offEnd - n.off) * SPB, drop: d, ang: n.ang, spin: n.spin, ring: n.ring || 0, idx: i, skip: !!n.skip, need: n.need, cross: n.cross, jack: n.jack, dark: d.dark });
+          CHART.push({ beat, t: beat * SPB, dur: (n.offEnd - n.off) * SPB, drop: d, ang: n.ang, spin: n.spin, ring: n.ring || 0, idx: i, skip: !!n.skip, pair: n.pair, cross: n.cross, jack: n.jack, dark: d.dark });
         });
         d.last = d.t + Math.max(0, ...d.notes.map((n) => n.offEnd)) * SPB;
         // a ring that closes in vanishes at its centre
@@ -1275,10 +1294,14 @@
         c.revealT = best ?? c.t - 1.5 * SPB;
       }
       // chart checks: every note must be reachable from the one before, and no two may wait on one spot
+      const mates = (c) => (c.pair ? CHART.filter((x) => x.pair === c.pair && x.drop === c.drop) : [c]);
       for (let i = 1; i < CHART.length; i++) {
         const a = CHART[i - 1], b = CHART[i];
-        const gap = b.t - (a.t + a.dur), pa = fieldPos(a, a.t + a.dur), pb = fieldPos(b, b.t);
-        const dist = Math.hypot(pb[0] - pa[0], pb[1] - pa[1]);
+        if (a.pair && a.pair === b.pair && a.drop === b.drop) continue;
+        // from either note of a pair before, to the nearer note of a pair after
+        const gap = b.t - (a.t + a.dur);
+        let dist = Infinity;
+        for (const x of mates(a)) for (const y of mates(b)) { const pa = fieldPos(x, x.t + x.dur), pb = fieldPos(y, y.t); dist = Math.min(dist, Math.hypot(pb[0] - pa[0], pb[1] - pa[1])); }
         if ((gap < 0.1 && !(a.jack && b.jack && a.jack.id === b.jack.id && gap > 0.05)) || dist / Math.max(gap, 0.01) > 2.2) console.warn(`${def.id}: beat ${b.beat}: ${gap.toFixed(2)} s after the last note but ${dist.toFixed(2)} away`);
       }
       for (let i = 0; i < CHART.length; i++) {
@@ -1574,6 +1597,13 @@
           g.beginPath(); g.arc(x, y, r * k, 0, TAU); g.fill();
           g.strokeStyle = rgba(col, 1); g.lineWidth = 3;
           g.beginPath(); g.arc(x, y, r, 0, TAU); g.stroke();
+          if (n.partner && !n.partner.head && n.ang < n.partner.ang) {
+            // the two points of a crossing pair, joined: strike both at once
+            const [qx, qy] = notePos(n.partner, n.partner.t);
+            g.strokeStyle = rgba(PAPER, 0.3 + 0.4 * k); g.lineWidth = 2; g.setLineDash([6, 6]);
+            g.beginPath(); g.moveTo(x, y); g.lineTo(qx, qy); g.stroke();
+            g.setLineDash([]);
+          }
           if (n.cross) {
             // a crossing: the other ring's colour outside, and a star of white light
             g.strokeStyle = rgba(HUES[n.cross.hue], 1); g.lineWidth = 3;
@@ -1633,6 +1663,24 @@
         } else if (kit.playing() && !S.touch) p = S.aim;
         if (!p) return;
         const r = noteR();
+        // a crossing pair is coming: a mirror aim shows where the second press strikes, the reflection of
+        // the aim across the line through the two rings' centres (the two crossings mirror each other there)
+        for (let i = S.cursor; i < S.notes.length; i++) {
+          const n = S.notes[i];
+          if (n.t - now > VIEW) break;
+          if (n.head) continue;
+          if (!n.partner || n.partner.head) break;
+          const [ax, ay] = toScreen(...ringC(n.drop, (n.t - n.drop.t) / SPB)), [bx, by] = toScreen(...ringC(n.cross, (n.t - n.cross.t) / SPB));
+          const dx = bx - ax, dy = by - ay, L = dx * dx + dy * dy || 1, u = ((p.x - ax) * dx + (p.y - ay) * dy) / L;
+          const fx = ax + dx * u, fy = ay + dy * u, mx = 2 * fx - p.x, my = 2 * fy - p.y;
+          const a = Math.max(0.25, 1 - (n.t - now) / VIEW);
+          g.strokeStyle = rgba(PAPER, 0.75 * a); g.lineWidth = 2; g.setLineDash([4, 4]);
+          g.beginPath(); g.arc(mx, my, r * 0.7, 0, TAU); g.stroke();
+          g.beginPath(); g.arc(mx, my, r * 1.8, 0, TAU); g.stroke();
+          g.setLineDash([]);
+          g.fillStyle = rgba(PAPER, 0.75 * a); g.beginPath(); g.arc(mx, my, 2.5, 0, TAU); g.fill();
+          break;
+        }
         g.strokeStyle = rgba(PAPER, 0.9); g.lineWidth = 2;
         g.beginPath(); g.arc(p.x, p.y, r * 0.7, 0, TAU); g.stroke();
         g.fillStyle = rgba(PAPER, 0.9);
@@ -3165,12 +3213,21 @@
         const recent = [];
         for (const e of events) {
           if (e.z !== undefined) {
-            // two colours from either side of a point near the last note, crossing exactly there
-            const P = clampP([last[0] - Math.sign(last[0] || 1) * 0.2, last[1] - Math.sign(last[1] || 1) * 0.12]);
-            const A = drop(e.z - 3.5, [P[0] - 0.3, P[1] - 0.24], k % 2 ? G : R, ''), B2 = drop(e.z - 3.5, [P[0] + 0.3, P[1] - 0.24], k % 2 ? BL : G, '');
-            cross(e.z, A, B2, { side: 0 });
-            last = P;
-            recent.push(P);
+            // two colours from either side, near the last note; they cross at two points, one above and
+            // one below the line between them, and both are struck together
+            // where to put them: near enough to reach from the last note, clear of the notes just played
+            let cx = 0, cy = 0, best = -1;
+            for (const dx of [0, -0.2, 0.2, -0.35, 0.35]) {
+              for (const y of [-0.14, 0, 0.14]) {
+                const x = Math.max(-0.4, Math.min(0.4, last[0] * 0.6 + dx)), pts = [[x, y - 0.24], [x, y + 0.24]];
+                if (Math.min(...pts.map((q) => Math.hypot(q[0] - last[0], q[1] - last[1]))) > 0.42) continue;
+                const clear = Math.min(9, ...recent.flatMap(([rx, ry]) => pts.map((q) => Math.hypot(q[0] - rx, q[1] - ry))));
+                if (clear > best) { best = clear; cx = x; cy = y; }
+              }
+            }
+            const A = drop(e.z - 3.5, [cx - 0.3, cy], k % 2 ? G : R, ''), B2 = drop(e.z - 3.5, [cx + 0.3, cy], k % 2 ? BL : G, '');
+            const P = cross(e.z, A, B2);
+            if (P) { last = Math.hypot(P[0][0] - last[0], P[0][1] - last[1]) < Math.hypot(P[1][0] - last[0], P[1][1] - last[1]) ? P[0] : P[1]; recent.push(...P); }
             continue;
           }
           // the next drop goes a step away from the last note, in a direction clear of the notes just played
@@ -3199,7 +3256,7 @@
           k++;
         }
       };
-      lead(120, 168, [127.5, 136, 143.5, 152, 159.5, 168], 'plain', [-0.7, 0.1]);
+      lead(120, 168, [127.5, 136, 143.5, 152, 159.5], 'plain', [-0.7, 0.1]);
       // MIRROR: every drop has its reflection across the middle; the two take turns
       beam(168, [1.7, 0.3]);
       [0.15, -0.15, 0.2, -0.1].forEach((y, k) => {

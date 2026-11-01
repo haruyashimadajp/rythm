@@ -159,7 +159,7 @@
       <li><b>スマホ</b><span>ノーツを直接タップ</span></li>
       <li><b>長押し</b><span>波紋と一緒に動く光を、押したまま追いかける</span></li>
       <li><b>水切り</b><span>跳ねてくる石が着水する点を叩く</span></li>
-      <li><b>交点</b><span>二つの波紋が交わる点。<kbd>Z</kbd> <kbd>X</kbd> を同時に（クリックとキーでも）、スマホは二本指で同時にタップ</span></li>
+      <li><b>交点</b><span>二つの波紋が交わる<strong>2点</strong>を同時に叩く。スマホは二本指で2点を同時にタップ。パソコンはマウスを片方に合わせると反対側に鏡の照準が出るので、<kbd>Z</kbd> <kbd>X</kbd> を同時に（クリックとキーでも）</span></li>
     </ul>
     <label class="check"><input type="checkbox" id="auto"> オートプレイで見る</label>
     <div class="actions">
@@ -335,12 +335,20 @@
   }
 
   // ===== Judging =====
-  const DOUBLE = 0.12; // how close together the two presses of a crossing note must be
+  const DOUBLE = 0.12; // how close together the two presses of a crossing pair must be (mouse and keys)
+  let pendingPair = null; // a crossing pair half struck by mouse or key: { token, at, partner }
   const gradeOf = (adt) => (adt <= WIN.perfect ? 'perfect' : adt <= WIN.great ? 'great' : 'good');
 
   function newRun(auto, attract) {
     byChart.clear();
     S.notes = M.chart.map((c) => { const n = { ...c, src: c, end: c.t + c.dur, head: null, tail: null, holding: null, off: 0 }; byChart.set(c, n); return n; });
+    // the two notes where two rings cross know each other
+    const pairs = new Map();
+    for (const n of S.notes) {
+      if (!n.pair) continue;
+      if (pairs.has(n.pair)) { const m = pairs.get(n.pair); m.partner = n; n.partner = m; } else pairs.set(n.pair, n);
+    }
+    pendingPair = null;
     S.cursor = 0; S.auto = auto; S.attract = attract;
     S.combo = 0; S.maxCombo = 0; S.weight = 0;
     S.counts = { perfect: 0, great: 0, good: 0, miss: 0 };
@@ -358,23 +366,28 @@
   }
 
   // Strike the earliest note under the aim; a hold remembers `token` so its release can end it.
+  // A crossing pair is two notes at the two points where two rings cross, struck together.
+  // Fingers each strike their own point. A mouse can only aim at one, so with mouse and keys the
+  // second press (another key, or the click) strikes the other point, where the mirror aim sits.
+  const pointerToken = (token) => typeof token === 'number';
   function press(token, now) {
     const p = aimOf(token);
+    if (pendingPair && !pointerToken(token) && token !== pendingPair.token && now - pendingPair.at <= DOUBLE && !pendingPair.partner.head) {
+      const n = pendingPair.partner;
+      pendingPair = null;
+      n.head = gradeOf(Math.abs(now - n.t));
+      judge(n, n.head, now);
+      if (!S.attract && !S.auto) audio.tick();
+      return true;
+    }
     for (let i = S.cursor; i < S.notes.length; i++) {
       const n = S.notes[i];
       if (n.t > now + WIN.good) break;
       if (n.head || !M.hitTest(n, p.x, p.y)) continue;
       const dt = now - n.t;
       if (Math.abs(dt) > WIN.good) continue;
-      if (n.need === 2) {
-        // a crossing note takes two presses together (two keys, a key and a click, or two fingers)
-        if (n.pressTok === undefined || n.pressTok === token || now - n.pressAt > DOUBLE) { n.pressTok = token; n.pressAt = now; return true; }
-        n.head = gradeOf(Math.max(Math.abs(dt), Math.abs(n.pressAt - n.t)));
-        judge(n, n.head, now);
-        if (!S.attract && !S.auto) audio.tick();
-        return true;
-      }
       n.head = gradeOf(Math.abs(dt));
+      if (n.partner && !n.partner.head && !pointerToken(token)) pendingPair = { token, at: now, partner: n.partner };
       judge(n, n.head, now);
       if (!S.attract && !S.auto) audio.tick();
       if (n.dur > 0) n.holding = token;
@@ -402,8 +415,6 @@
         n.head = 'perfect'; judge(n, 'perfect', now);
         if (n.dur > 0) n.holding = 'auto';
       }
-      // only one press reached a crossing note: it counts, but only as GOOD
-      if (n.need === 2 && !n.head && n.pressTok !== undefined && now - n.pressAt > DOUBLE) { n.head = 'good'; judge(n, 'good', now); }
       if (!n.head && now - n.t > WIN.good) {
         n.head = 'miss'; judge(n, 'miss', now);
         if (n.dur > 0) { n.tail = 'miss'; judge(n, 'miss', now); }
@@ -619,6 +630,9 @@
     return {
       loadClip,
       async start() {
+        // until this run's start time is set, the song clock must not read the last run's: frames drawn
+        // while the context resumes would otherwise judge the new notes against the old position
+        start = Infinity; lastSong = -Infinity;
         init();
         if (ac.state !== 'running') await ac.resume();
         const clip = await loadClip(M);
@@ -639,6 +653,7 @@
       },
       halt() {
         running = false;
+        start = Infinity; lastSong = -Infinity;
         if (clipSrc) { try { clipSrc.stop(ac.currentTime + 0.1); } catch (e) { /* not started */ } clipSrc = null; }
         if (out) out.gain.setTargetAtTime(0, ac.currentTime, 0.05);
         for (const m of SONGS) if (m.onAudioStop) m.onAudioStop();

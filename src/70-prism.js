@@ -104,12 +104,21 @@
         const recent = [];
         for (const e of events) {
           if (e.z !== undefined) {
-            // two colours from either side of a point near the last note, crossing exactly there
-            const P = clampP([last[0] - Math.sign(last[0] || 1) * 0.2, last[1] - Math.sign(last[1] || 1) * 0.12]);
-            const A = drop(e.z - 3.5, [P[0] - 0.3, P[1] - 0.24], k % 2 ? G : R, ''), B2 = drop(e.z - 3.5, [P[0] + 0.3, P[1] - 0.24], k % 2 ? BL : G, '');
-            cross(e.z, A, B2, { side: 0 });
-            last = P;
-            recent.push(P);
+            // two colours from either side, near the last note; they cross at two points, one above and
+            // one below the line between them, and both are struck together
+            // where to put them: near enough to reach from the last note, clear of the notes just played
+            let cx = 0, cy = 0, best = -1;
+            for (const dx of [0, -0.2, 0.2, -0.35, 0.35]) {
+              for (const y of [-0.14, 0, 0.14]) {
+                const x = Math.max(-0.4, Math.min(0.4, last[0] * 0.6 + dx)), pts = [[x, y - 0.24], [x, y + 0.24]];
+                if (Math.min(...pts.map((q) => Math.hypot(q[0] - last[0], q[1] - last[1]))) > 0.42) continue;
+                const clear = Math.min(9, ...recent.flatMap(([rx, ry]) => pts.map((q) => Math.hypot(q[0] - rx, q[1] - ry))));
+                if (clear > best) { best = clear; cx = x; cy = y; }
+              }
+            }
+            const A = drop(e.z - 3.5, [cx - 0.3, cy], k % 2 ? G : R, ''), B2 = drop(e.z - 3.5, [cx + 0.3, cy], k % 2 ? BL : G, '');
+            const P = cross(e.z, A, B2);
+            if (P) { last = Math.hypot(P[0][0] - last[0], P[0][1] - last[1]) < Math.hypot(P[1][0] - last[0], P[1][1] - last[1]) ? P[0] : P[1]; recent.push(...P); }
             continue;
           }
           // the next drop goes a step away from the last note, in a direction clear of the notes just played
@@ -138,7 +147,7 @@
           k++;
         }
       };
-      lead(120, 168, [127.5, 136, 143.5, 152, 159.5, 168], 'plain', [-0.7, 0.1]);
+      lead(120, 168, [127.5, 136, 143.5, 152, 159.5], 'plain', [-0.7, 0.1]);
       // MIRROR: every drop has its reflection across the middle; the two take turns
       beam(168, [1.7, 0.3]);
       [0.15, -0.15, 0.2, -0.1].forEach((y, k) => {

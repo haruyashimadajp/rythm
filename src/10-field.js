@@ -149,9 +149,10 @@
         if (!inField(px, py)) console.warn(`${def.id}: pulse at beat ${beat} strikes outside the field`);
         return d;
       }
-      // cross(beat, dropA, dropB, opts): a note where the two rings cross at `beat`; it takes two
-      // presses at once. opts.side (0 or 1) picks which of the two crossings; by default the one in the field.
-      function cross(beat, A, B, o = {}) {
+      // cross(beat, dropA, dropB): two notes at the two points where the rings cross at `beat`,
+      // struck together (a crossing pair). Returns both points.
+      let pairId = 0;
+      function cross(beat, A, B) {
         const oa = beat - A.beat, ob = beat - B.beat;
         const [ax, ay] = ringC(A, oa), [bx, by] = ringC(B, ob), ra = ringR(A, oa), rb = ringR(B, ob);
         const dx = bx - ax, dy = by - ay, dd = Math.hypot(dx, dy);
@@ -159,10 +160,13 @@
         const l = (ra * ra - rb * rb + dd * dd) / (2 * dd), h = Math.sqrt(Math.max(0, ra * ra - l * l));
         const mx = ax + (dx * l) / dd, my = ay + (dy * l) / dd;
         const P = [[mx - (dy * h) / dd, my + (dx * h) / dd], [mx + (dy * h) / dd, my - (dx * h) / dd]];
-        const p = o.side !== undefined ? P[o.side] : (inField(...P[0]) && (!inField(...P[1]) || Math.hypot(...P[0]) < Math.hypot(...P[1])) ? P[0] : P[1]);
-        if (!inField(...p)) console.warn(`${def.id}: crossing at beat ${beat} is outside the field`);
-        A.notes.push({ off: oa, offEnd: oa, ang: Math.atan2(p[1] - ay, p[0] - ax), spin: 0, need: 2, cross: B });
-        return p;
+        const id = ++pairId;
+        for (const p of P) {
+          if (!inField(...p)) console.warn(`${def.id}: crossing at beat ${beat} is outside the field`);
+          A.notes.push({ off: oa, offEnd: oa, ang: Math.atan2(p[1] - ay, p[0] - ax), spin: 0, cross: B, pair: id });
+        }
+        if (Math.hypot(P[0][0] - P[1][0], P[0][1] - P[1][1]) < 0.2) console.warn(`${def.id}: the two crossings at beat ${beat} are too close together`);
+        return P;
       }
       // skip(beat, from, to, hue, pattern): a stone skips across the water from `from` towards `to`,
       // landing on each 'o' (8th steps, or opts.step); each landing is a note on the spot it lands.
@@ -201,7 +205,7 @@
         if (d.stone) d.stone.t = d.stone.beat * SPB;
         d.notes.forEach((n, i) => {
           const beat = d.beat + n.off;
-          CHART.push({ beat, t: beat * SPB, dur: (n.offEnd - n.off) * SPB, drop: d, ang: n.ang, spin: n.spin, ring: n.ring || 0, idx: i, skip: !!n.skip, need: n.need, cross: n.cross, jack: n.jack, dark: d.dark });
+          CHART.push({ beat, t: beat * SPB, dur: (n.offEnd - n.off) * SPB, drop: d, ang: n.ang, spin: n.spin, ring: n.ring || 0, idx: i, skip: !!n.skip, pair: n.pair, cross: n.cross, jack: n.jack, dark: d.dark });
         });
         d.last = d.t + Math.max(0, ...d.notes.map((n) => n.offEnd)) * SPB;
         // a ring that closes in vanishes at its centre
@@ -234,10 +238,14 @@
         c.revealT = best ?? c.t - 1.5 * SPB;
       }
       // chart checks: every note must be reachable from the one before, and no two may wait on one spot
+      const mates = (c) => (c.pair ? CHART.filter((x) => x.pair === c.pair && x.drop === c.drop) : [c]);
       for (let i = 1; i < CHART.length; i++) {
         const a = CHART[i - 1], b = CHART[i];
-        const gap = b.t - (a.t + a.dur), pa = fieldPos(a, a.t + a.dur), pb = fieldPos(b, b.t);
-        const dist = Math.hypot(pb[0] - pa[0], pb[1] - pa[1]);
+        if (a.pair && a.pair === b.pair && a.drop === b.drop) continue;
+        // from either note of a pair before, to the nearer note of a pair after
+        const gap = b.t - (a.t + a.dur);
+        let dist = Infinity;
+        for (const x of mates(a)) for (const y of mates(b)) { const pa = fieldPos(x, x.t + x.dur), pb = fieldPos(y, y.t); dist = Math.min(dist, Math.hypot(pb[0] - pa[0], pb[1] - pa[1])); }
         if ((gap < 0.1 && !(a.jack && b.jack && a.jack.id === b.jack.id && gap > 0.05)) || dist / Math.max(gap, 0.01) > 2.2) console.warn(`${def.id}: beat ${b.beat}: ${gap.toFixed(2)} s after the last note but ${dist.toFixed(2)} away`);
       }
       for (let i = 0; i < CHART.length; i++) {
@@ -533,6 +541,13 @@
           g.beginPath(); g.arc(x, y, r * k, 0, TAU); g.fill();
           g.strokeStyle = rgba(col, 1); g.lineWidth = 3;
           g.beginPath(); g.arc(x, y, r, 0, TAU); g.stroke();
+          if (n.partner && !n.partner.head && n.ang < n.partner.ang) {
+            // the two points of a crossing pair, joined: strike both at once
+            const [qx, qy] = notePos(n.partner, n.partner.t);
+            g.strokeStyle = rgba(PAPER, 0.3 + 0.4 * k); g.lineWidth = 2; g.setLineDash([6, 6]);
+            g.beginPath(); g.moveTo(x, y); g.lineTo(qx, qy); g.stroke();
+            g.setLineDash([]);
+          }
           if (n.cross) {
             // a crossing: the other ring's colour outside, and a star of white light
             g.strokeStyle = rgba(HUES[n.cross.hue], 1); g.lineWidth = 3;
@@ -592,6 +607,24 @@
         } else if (kit.playing() && !S.touch) p = S.aim;
         if (!p) return;
         const r = noteR();
+        // a crossing pair is coming: a mirror aim shows where the second press strikes, the reflection of
+        // the aim across the line through the two rings' centres (the two crossings mirror each other there)
+        for (let i = S.cursor; i < S.notes.length; i++) {
+          const n = S.notes[i];
+          if (n.t - now > VIEW) break;
+          if (n.head) continue;
+          if (!n.partner || n.partner.head) break;
+          const [ax, ay] = toScreen(...ringC(n.drop, (n.t - n.drop.t) / SPB)), [bx, by] = toScreen(...ringC(n.cross, (n.t - n.cross.t) / SPB));
+          const dx = bx - ax, dy = by - ay, L = dx * dx + dy * dy || 1, u = ((p.x - ax) * dx + (p.y - ay) * dy) / L;
+          const fx = ax + dx * u, fy = ay + dy * u, mx = 2 * fx - p.x, my = 2 * fy - p.y;
+          const a = Math.max(0.25, 1 - (n.t - now) / VIEW);
+          g.strokeStyle = rgba(PAPER, 0.75 * a); g.lineWidth = 2; g.setLineDash([4, 4]);
+          g.beginPath(); g.arc(mx, my, r * 0.7, 0, TAU); g.stroke();
+          g.beginPath(); g.arc(mx, my, r * 1.8, 0, TAU); g.stroke();
+          g.setLineDash([]);
+          g.fillStyle = rgba(PAPER, 0.75 * a); g.beginPath(); g.arc(mx, my, 2.5, 0, TAU); g.fill();
+          break;
+        }
         g.strokeStyle = rgba(PAPER, 0.9); g.lineWidth = 2;
         g.beginPath(); g.arc(p.x, p.y, r * 0.7, 0, TAU); g.stroke();
         g.fillStyle = rgba(PAPER, 0.9);
