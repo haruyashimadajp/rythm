@@ -7,9 +7,13 @@
   //
   //  def: id, title, jp, genre, level (1-10), lede, theme, hues (4 colours),
   //    bpm, beatsPerBar, bars, sections [{ bar, name, hue }], chords,
+  //    tempo [[beat, bpm, call]...] and stops [[beat, seconds]...] for a
+  //    tempo that changes (rings follow it; `call` announces the change),
+  //    bpmLabel for the menu,
   //    speed (ripple growth, field units per beat), ring { sides, rot }
   //    (0 sides = circles), attractFromBar,
-  //    chart({ drop, skip, wave, pulse, cross, tip, B }) to place the notes
+  //    chart({ drop, skip, wave, pulse, cross, tip, B, chord, tap, dial })
+  //    to place the notes
   //    (see below), song: the music (see the engine's audio; leadMidi
   //    defaults to the chord's lead tones), or audioFile { src, t0 } for a
   //    recorded song whose beat 0 is t0 seconds in; kickOn(bar, section) or
@@ -32,6 +36,9 @@
     defineSong((kit) => {
       const { g, rgba, hex, S, TAU, DEG } = kit;
       const BPM = def.bpm, SPB = 60 / BPM, BPB = def.beatsPerBar || 4;
+      // the tempo can change (def.tempo [[beat, bpm]...]) and stop (def.stops [[beat, seconds]...]); rings live
+      // in beats, so they speed up, slow down and freeze with the music
+      const TM = kit.tempoMap(def.tempo || [[0, BPM]], def.stops || []), { timeOf, beatOf } = TM;
       const theme = def.theme;
       const INK = hex(theme.ink), INK2 = hex(theme.ink2), PAPER = hex(theme.paper), MUTED = hex(theme.muted), ACCENT = hex(theme.accent);
       const HUES = def.hues.map(hex);
@@ -86,6 +93,9 @@
           dark: !!o.dark, reveal: !!o.reveal,
         };
         if (o.path) { d.path = [[0, x, y], ...o.path]; d.ease = o.ease || 'smooth'; }
+        if (o.dial) d.dial = { v: o.dial.v ?? 0.12, dir: o.dial.dir ?? 1 };
+        // opts.show: its notes appear only that many beats before the drop lands (keeps busy screens clear)
+        if (o.show !== undefined) d.showBeat = beat - o.show;
         DROPS.push(d);
         return d;
       }
@@ -127,7 +137,7 @@
             if (!fits(a)) console.warn(`${def.id}: drop at beat ${beat}: note ${off} does not fit`);
           }
           if (!d.path && inField(x, y) && d.speed > 0 && ringR(d, offEnd) > 0.62) console.warn(`${def.id}: drop at beat ${beat}: note ${off} is ${ringR(d, offEnd).toFixed(2)} out; split the drop`);
-          d.notes.push({ off, offEnd, ang: a, spin: sp });
+          d.notes.push({ off, offEnd, ang: a, spin: sp, midi: o.midi ? o.midi[ni] : undefined });
           prev = at(a, 1);
           ang = a + sp;
           prevOff = offEnd;
@@ -144,7 +154,7 @@
         const n = o.n ?? 3, gap = o.gap ?? 0.5, off = o.off ?? 1, a = (o.a ?? -90) * DEG;
         const d = newDrop(beat, x, y, hue, { ...o, rings: n, gap });
         const id = ++jackId;
-        for (let k = 0; k < n; k++) d.notes.push({ off: off + k * gap, offEnd: off + k * gap, ang: a, spin: 0, ring: k, jack: { id, k, n } });
+        for (let k = 0; k < n; k++) d.notes.push({ off: off + k * gap, offEnd: off + k * gap, ang: a, spin: 0, ring: k, jack: { id, k, n }, midi: Array.isArray(o.midi) ? o.midi[k % o.midi.length] : o.midi });
         const [px, py] = ringPoint(d, off, a);
         if (!inField(px, py)) console.warn(`${def.id}: pulse at beat ${beat} strikes outside the field`);
         return d;
@@ -189,26 +199,52 @@
           const from = prev || { x: x - (x1 - x0) * lead, y: y - (y1 - y0) * lead, beat: beat + off - pre };
           const d = newDrop(beat + off, x, y, hue, { speed: 0.08, dark: o.dark });
           d.small = true; d.stone = from;
-          d.notes.push({ off: 0, offEnd: 0, ang: 0, spin: 0, skip: true });
+          d.notes.push({ off: 0, offEnd: 0, ang: 0, spin: 0, skip: true, midi: o.midi ? o.midi[hits.indexOf(off)] : undefined });
           prev = { x, y, beat: beat + off };
         });
       }
+      // chord(beat, drop, angles, opts): notes at several angles on one ring, all reached at `beat` and struck
+      // together (fingers; or with the mouse on one of them, one more button per extra note). Returns the points.
+      function chord(beat, d, angs, o = {}) {
+        const off = beat - d.beat, id = ++pairId;
+        const P = angs.map((deg, k) => {
+          const a = deg * DEG, p = ringPoint(d, off, a);
+          if (!inField(...p)) console.warn(`${def.id}: chord at beat ${beat}: angle ${deg} is outside the field`);
+          d.notes.push({ off, offEnd: off, ang: a, spin: 0, pair: id, chord: true, midi: o.midi ? o.midi[k % o.midi.length] : undefined });
+          return p;
+        });
+        for (let i = 0; i < P.length; i++) for (let j = i + 1; j < P.length; j++) if (Math.hypot(P[i][0] - P[j][0], P[i][1] - P[j][1]) < 0.2) console.warn(`${def.id}: chord at beat ${beat}: notes too close together`);
+        return P;
+      }
+      // tap(drop, beat, angle, opts): one note on a drop's ring at `beat` (opts.len beats long makes it a hold,
+      // opts.spin degrees round the ring while held)
+      function tap(d, beat, deg, o = {}) {
+        const off = beat - d.beat, len = o.len || 0, a = deg * DEG;
+        const p = ringPoint(d, off, a);
+        if (!inField(...p)) console.warn(`${def.id}: note at beat ${beat}: angle ${deg} is outside the field`);
+        d.notes.push({ off, offEnd: off + len, ang: a, spin: (o.spin || 0) * DEG, midi: o.midi });
+        return p;
+      }
+      // dial(beat, [x, y], hue, R, opts): a ring that stands still (the line to strike on) from `beat` on;
+      // its notes come to it instead: out from the centre (opts.dir 1) or in from outside (-1), opts.v field
+      // units per beat, so they rush in faster as the tempo rises. Notes go on with tap() and chord().
+      const dial = (beat, p, hue, R, o = {}) => newDrop(beat, p[0], p[1], hue, { ...o, speed: 0, r0: R, dial: { v: o.v, dir: o.dir } });
       const B = (bar, beat = 0) => bar * BPB + beat;
       // where note i of drop d sits, and when: for chaining a new drop onto a note
       const tip = (d, i) => { const n = d.notes[i < 0 ? d.notes.length + i : i]; return { beat: d.beat + n.offEnd, p: ringPoint(d, n.offEnd, n.ang + n.spin, n.ring || 0) }; };
-      def.chart({ drop, skip, wave, pulse, cross, tip, B });
+      def.chart({ drop, skip, wave, pulse, cross, tip, B, chord, tap, dial, timeOf });
 
       const CHART = [];
       for (const d of DROPS) {
-        d.t = d.beat * SPB;
-        if (d.stone) d.stone.t = d.stone.beat * SPB;
+        d.t = timeOf(d.beat);
+        if (d.stone) d.stone.t = timeOf(d.stone.beat);
         d.notes.forEach((n, i) => {
-          const beat = d.beat + n.off;
-          CHART.push({ beat, t: beat * SPB, dur: (n.offEnd - n.off) * SPB, drop: d, ang: n.ang, spin: n.spin, ring: n.ring || 0, idx: i, skip: !!n.skip, pair: n.pair, cross: n.cross, jack: n.jack, dark: d.dark });
+          const beat = d.beat + n.off, t = timeOf(beat);
+          CHART.push({ beat, t, dur: timeOf(d.beat + n.offEnd) - t, len: n.offEnd - n.off, drop: d, ang: n.ang, spin: n.spin, ring: n.ring || 0, idx: i, skip: !!n.skip, pair: n.pair, cross: n.cross, chord: !!n.chord, jack: n.jack, dark: d.dark, midi: n.midi });
         });
-        d.last = d.t + Math.max(0, ...d.notes.map((n) => n.offEnd)) * SPB;
+        d.last = timeOf(d.beat + Math.max(0, ...d.notes.map((n) => n.offEnd)));
         // a ring that closes in vanishes at its centre
-        if (d.speed < 0) { let off = 0; while (ringR(d, off) > 0 && off < 64) off += 0.02; d.closeT = d.t + off * SPB; }
+        if (d.speed < 0) { let off = 0; while (ringR(d, off) > 0 && off < 64) off += 0.02; d.closeOff = off; d.closeT = timeOf(d.beat + off); }
       }
       DROPS.sort((a, b) => a.t - b.t);
       kit.sortChart(CHART);
@@ -225,8 +261,9 @@
 
       // where a note sits (field units), or for a hold, where the ripple front is along it at time t
       function fieldPos(n, t) {
-        const tt = n.dur > 0 ? Math.min(n.t + n.dur, Math.max(n.t, t)) : n.t, u = n.dur > 0 ? (tt - n.t) / n.dur : 0;
-        return ringPoint(n.drop, (tt - n.drop.t) / SPB, n.ang + n.spin * u, n.ring);
+        if (!(n.dur > 0)) return ringPoint(n.drop, n.beat - n.drop.beat, n.ang, n.ring);
+        const b = Math.min(n.beat + n.len, Math.max(n.beat, beatOf(Math.min(n.t + n.dur, Math.max(n.t, t))))), u = (b - n.beat) / n.len;
+        return ringPoint(n.drop, b - n.drop.beat, n.ang + n.spin * u, n.ring);
       }
       // dark notes show themselves when the last reveal ring before them sweeps past (at least a beat ahead)
       const REVEALERS = DROPS.filter((d) => d.reveal);
@@ -239,12 +276,12 @@
           for (let off = 0; off < 48; off += 0.04) {
             const [cx, cy] = ringC(r, off);
             if (ringR(r, off) < Math.hypot(px - cx, py - cy)) continue;
-            const t = r.t + off * SPB;
-            if (t <= c.t - SPB && (best === null || t > best)) best = t;
+            const t = timeOf(r.beat + off);
+            if (r.beat + off <= c.beat - 1 && (best === null || t > best)) best = t;
             break;
           }
         }
-        c.revealT = best ?? c.t - 1.5 * SPB;
+        c.revealT = best ?? timeOf(c.beat - 1.5);
       }
       // chart checks: every note must be reachable from the one before, and no two may wait on one spot
       const mates = (c) => (c.pair ? CHART.filter((x) => x.pair === c.pair && x.drop === c.drop) : [c]);
@@ -255,11 +292,18 @@
         const gap = b.t - (a.t + a.dur);
         let dist = Infinity;
         for (const x of mates(a)) for (const y of mates(b)) { const pa = fieldPos(x, x.t + x.dur), pb = fieldPos(y, y.t); dist = Math.min(dist, Math.hypot(pb[0] - pa[0], pb[1] - pa[1])); }
-        if ((gap < 0.1 && !(a.jack && b.jack && a.jack.id === b.jack.id && gap > 0.05)) || dist / Math.max(gap, 0.01) > 2.2) console.warn(`${def.id}: beat ${b.beat}: ${gap.toFixed(2)} s after the last note but ${dist.toFixed(2)} away`);
+        // (16ths at the fastest tempos come 60 ms apart: fine for a jack on one spot, a trill between two
+        // close spots, or a run whose notes stay close)
+        if (gap < 0.055 || (gap < 0.1 && !(a.jack && b.jack && a.jack.id === b.jack.id) && dist > 0.2) || dist / Math.max(gap, 0.01) > 2.2) console.warn(`${def.id}: beat ${b.beat}: ${gap.toFixed(2)} s after the last note but ${dist.toFixed(2)} away`);
       }
       for (let i = 0; i < CHART.length; i++) {
         for (let j = i + 1; j < CHART.length && CHART[j].t - CHART[i].t < 1.2; j++) {
           if (CHART[i].jack && CHART[j].jack && CHART[i].jack.id === CHART[j].jack.id) continue;
+          // notes coming to a standing ring arrive one after another along their lane, so they never sit together
+          if (CHART[i].drop.dial && CHART[j].drop.dial && CHART[j].t - CHART[i].t > 0.1) continue;
+          if (CHART[j].drop.dial && CHART[j].t - (CHART[i].t + CHART[i].dur) > 0.3) continue;
+          // nor do two notes that are never on the water at once
+          if (CHART[j].drop.showBeat !== undefined && CHART[i].t + CHART[i].dur < timeOf(CHART[j].drop.showBeat)) continue;
           const a = fieldPos(CHART[i], CHART[i].t), b = fieldPos(CHART[j], CHART[j].t);
           if (Math.hypot(a[0] - b[0], a[1] - b[1]) < 0.07) console.warn(`${def.id}: beats ${CHART[i].beat} and ${CHART[j].beat} share a spot`);
         }
@@ -279,7 +323,7 @@
 
       // ----- effects -----
       const particles = [], rings = [], waves = [];
-      let popups = [], shakeV = 0, flashV = 0, flashCol = PAPER, lastNow = -Infinity;
+      let popups = [], shakeV = 0, flashV = 0, flashCol = PAPER, lastNow = -Infinity, nowBeat = 0;
       const autoAim = { x: 0, y: 0 };
       function burst(x, y, col, power, spread = 1) {
         rings.push({ x, y, col, life: 0, max: 0.5, size: spread });
@@ -292,6 +336,7 @@
       // what a song's scene gets to draw with
       const field = {
         F, toScreen, noteR, HUES, INK, INK2, PAPER, MUTED, ACCENT, SPB, BPB, SECTIONS, DROPS, CHART, shape, burst, ringC, ringR, onScreen,
+        timeOf, beatOf, bpmAt: TM.bpmAt, stopped: TM.stopped,
         rings: [], // the rings on the water this frame: { x, y, R, hue, d } in field units
         get W() { return W; }, get H() { return H; },
         shake(v) { if (kit.fx()) shakeV = Math.max(shakeV, v); },
@@ -397,7 +442,7 @@
         for (const d of DROPS) {
           const lead = d.t - now;
           if (lead > 0.8) break;
-          const col = HUES[d.hue], off = (now - d.t) / SPB;
+          const col = HUES[d.hue], off = nowBeat - d.beat;
           const [cx, cy] = ringC(d, Math.max(0, off)), inside = onScreen(cx, cy);
           if (lead > 0) {
             if (d.stone) continue; // a skipping stone shows itself in flight (drawStones)
@@ -410,8 +455,8 @@
             }
             if (!inside) { edgeGlow(cx, cy, col, 1 - k); continue; }
             const [sx, sy] = toScreen(cx, cy);
-            if (d.speed < 0) {
-              // a ring that will close in: its outline gathers first
+            if (d.speed < 0 || d.dial) {
+              // a ring that will close in (or stand still): its outline gathers first
               g.setLineDash([4, 6]); g.strokeStyle = rgba(col, 0.5 * (1 - k)); g.lineWidth = 1.5;
               field.ringPath(cx, cy, d.r0); g.stroke(); g.setLineDash([]);
               continue;
@@ -491,6 +536,16 @@
       }
       const mixCol = (a, b, k) => kit.mix(a, b, k);
 
+      // a note coming to a standing ring (dial): where it is now, in field units, or null while it is unseen
+      function approach(n) {
+        const d = n.drop, D = d.dial, R = ringR(d, 0), r = R - D.dir * D.v * (n.beat - nowBeat);
+        if (D.dir > 0 ? r < 0 : r > R + 0.9) return null;
+        const [cx, cy] = ringC(d, n.beat - d.beat), sh = shape(n.ang);
+        return { p: [cx + Math.cos(n.ang) * r * sh, cy + Math.sin(n.ang) * r * sh], r, a: D.dir > 0 ? Math.min(1, r / 0.06) : Math.min(1, (R + 0.9 - r) / 0.25) };
+      }
+      // where a waiting note is drawn on screen
+      const shownPos = (n) => { const ap = n.drop.dial && !n.head ? approach(n) : null; return ap ? toScreen(...ap.p) : notePos(n, n.t); };
+
       function drawNotes(now) {
         const r = noteR();
         g.lineCap = 'round';
@@ -505,11 +560,28 @@
         }
         for (let i = S.notes.length - 1; i >= S.cursor; i--) {
           const n = S.notes[i];
-          if (n.t - now > VIEW || n.end < now - 0.05) continue;
+          const D = n.drop.dial, ap = D && !n.head ? approach(n) : null;
+          if (D ? !n.head && !ap : n.t - now > VIEW) continue;
+          if (n.end < now - 0.05) continue;
+          const shown = n.drop.showBeat === undefined ? 1 : Math.min(1, (nowBeat - n.drop.showBeat) / 0.5);
+          if (shown <= 0) continue;
           if (n.jack && !n.head && front.get(n.jack.id) !== n) continue;
           if (n.revealT !== undefined && now < n.revealT) continue;
           const col = HUES[n.drop.hue];
-          const appear = Math.min(1, (VIEW - (n.t - now)) / 0.3) * (n.revealT !== undefined ? Math.min(1, (now - n.revealT) / 0.15) : 1);
+          const appear = shown * (ap ? ap.a : D ? 1 : Math.min(1, (VIEW - (n.t - now)) / 0.3) * (n.revealT !== undefined ? Math.min(1, (now - n.revealT) / 0.15) : 1));
+          if (D && n.dur > 0 && n.tail === null && n.head !== 'miss') {
+            // a hold coming to a standing ring trails its body back along the way it comes
+            const R = ringR(n.drop, 0), [cx, cy] = ringC(n.drop, n.beat - n.drop.beat), a = n.ang + n.spin, sh = shape(a);
+            const clampR = (v) => (D.dir > 0 ? Math.max(0, Math.min(R, v)) : Math.max(R, Math.min(R + 0.9, v)));
+            const rh = clampR(ap ? ap.r : R), rt = clampR(R - D.dir * D.v * (n.beat + n.len - nowBeat));
+            if (Math.abs(rh - rt) > 0.003) {
+              const [hx, hy] = toScreen(cx + Math.cos(a) * rh * sh, cy + Math.sin(a) * rh * sh), [tx, ty] = toScreen(cx + Math.cos(a) * rt * sh, cy + Math.sin(a) * rt * sh);
+              g.globalAlpha = appear; g.lineCap = 'round';
+              g.strokeStyle = rgba(col, 0.3); g.lineWidth = r * 1.3; g.beginPath(); g.moveTo(hx, hy); g.lineTo(tx, ty); g.stroke();
+              g.strokeStyle = rgba(col, 0.85); g.lineWidth = 2; g.stroke();
+              g.globalAlpha = 1;
+            }
+          }
           if (n.dur > 0 && n.tail === null && n.head !== 'miss') {
             // hold: a channel along the path the ripple front will take; the light rides the front
             g.globalAlpha = appear;
@@ -530,15 +602,21 @@
             g.globalAlpha = 1;
           }
           if (n.head) continue;
-          const [x, y] = notePos(n, n.t);
+          const [x, y] = ap ? toScreen(...ap.p) : notePos(n, n.t);
           // fills from the centre as its ripple (or stone) closes in
           const k = Math.max(0, Math.min(1, 1 - (n.t - now) / VIEW));
           g.globalAlpha = appear;
-          if (!n.skip) {
+          if (D) {
+            // a note on its way to a standing ring runs along a lane from the centre to its spot on the ring
+            const [cx, cy] = toScreen(...ringC(n.drop, n.beat - n.drop.beat)), [ex, ey] = notePos(n, n.t);
+            g.strokeStyle = rgba(col, 0.28); g.lineWidth = 1.5;
+            g.beginPath(); g.moveTo(cx, cy); g.lineTo(ex, ey); g.stroke();
+            g.beginPath(); g.arc(ex, ey, r * 1.05, 0, TAU); g.stroke();
+          } else if (!n.skip) {
             // faint thread back to the drop that will reach it, so you know which ring to watch
             g.setLineDash([2, 7]); g.lineWidth = 1.2;
             for (const d of n.cross ? [n.drop, n.cross] : [n.drop]) {
-              const [fx, fy] = ringC(d, Math.max(0, (now - d.t) / SPB));
+              const [fx, fy] = ringC(d, Math.max(0, nowBeat - d.beat));
               if (!onScreen(fx, fy)) continue;
               const [sx, sy] = toScreen(fx, fy);
               g.strokeStyle = rgba(HUES[d.hue], 0.22);
@@ -558,6 +636,19 @@
             g.strokeStyle = rgba(PAPER, 0.3 + 0.4 * k); g.lineWidth = 2; g.setLineDash([6, 6]);
             g.beginPath(); g.moveTo(x, y); g.lineTo(qx, qy); g.stroke();
             g.setLineDash([]);
+          }
+          if (n.chord && n.group.find((m) => !m.head) === n) {
+            // a chord: its notes joined round the ring, struck all at once
+            const pts = n.group.filter((m) => !m.head).sort((p, q) => p.ang - q.ang).map(shownPos);
+            g.strokeStyle = rgba(PAPER, 0.35 + 0.45 * k); g.lineWidth = 2.5; g.setLineDash([7, 5]);
+            g.beginPath(); pts.forEach(([px, py], q) => (q ? g.lineTo(px, py) : g.moveTo(px, py)));
+            if (pts.length > 2) g.closePath();
+            g.stroke(); g.setLineDash([]);
+          }
+          if (n.chord) {
+            // and each wears a second ring
+            g.strokeStyle = rgba(PAPER, 0.85); g.lineWidth = 2;
+            g.beginPath(); g.arc(x, y, r * 1.25, 0, TAU); g.stroke();
           }
           const num = kit.order() && n.order;
           if (n.cross) {
@@ -586,9 +677,9 @@
               const a = q * (TAU / 4) + TAU / 8;
               g.beginPath(); g.moveTo(x + Math.cos(a) * r * 1.15, y + Math.sin(a) * r * 1.15); g.lineTo(x + Math.cos(a) * r * 1.5, y + Math.sin(a) * r * 1.5); g.stroke();
             }
-          } else if (n.dur > 0) {
+          } else if (n.dur > 0 && !(D && !n.spin)) {
             // a hold's head shows which way the light will travel (on the rim when the order number is inside)
-            const [qx, qy] = notePos(n, n.t + Math.min(n.dur, SPB * 0.25)), a = Math.atan2(qy - y, qx - x);
+            const [qx, qy] = notePos(n, timeOf(n.beat + Math.min(n.len, 0.25))), a = Math.atan2(qy - y, qx - x);
             const c0 = num ? r * 1.25 : 0, s0 = num ? 1.15 : 1;
             const ox = x + Math.cos(a) * c0, oy = y + Math.sin(a) * c0;
             g.fillStyle = rgba(PAPER, 0.9);
@@ -640,8 +731,27 @@
           const n = S.notes[i];
           if (n.t - now > VIEW) break;
           if (n.head) continue;
+          if (n.chord) {
+            // a chord: ghost aims turn the aim round the ring's centre onto each other note of it
+            const rest = n.group.filter((m) => !m.head);
+            if (rest.length < 2) break;
+            const [cx, cy] = toScreen(...ringC(n.drop, n.beat - n.drop.beat)), ang = (m) => { const [qx, qy] = notePos(m, m.t); return Math.atan2(qy - cy, qx - cx); };
+            let near = rest[0], best = Infinity;
+            for (const m of rest) { const [qx, qy] = notePos(m, m.t), dd = Math.hypot(qx - p.x, qy - p.y); if (dd < best) { best = dd; near = m; } }
+            const a0 = ang(near), al = Math.max(0.25, 1 - (n.t - now) / VIEW);
+            for (const m of rest) {
+              if (m === near) continue;
+              const da = ang(m) - a0, c = Math.cos(da), sn = Math.sin(da), dx = p.x - cx, dy = p.y - cy;
+              const gx = cx + dx * c - dy * sn, gy = cy + dx * sn + dy * c;
+              g.strokeStyle = rgba(PAPER, 0.75 * al); g.lineWidth = 2; g.setLineDash([4, 4]);
+              g.beginPath(); g.arc(gx, gy, r * 0.7, 0, TAU); g.stroke();
+              g.setLineDash([]);
+              g.fillStyle = rgba(PAPER, 0.75 * al); g.beginPath(); g.arc(gx, gy, 2.5, 0, TAU); g.fill();
+            }
+            break;
+          }
           if (!n.partner || n.partner.head) break;
-          const [ax, ay] = toScreen(...ringC(n.drop, (n.t - n.drop.t) / SPB)), [bx, by] = toScreen(...ringC(n.cross, (n.t - n.cross.t) / SPB));
+          const [ax, ay] = toScreen(...ringC(n.drop, n.beat - n.drop.beat)), [bx, by] = toScreen(...ringC(n.cross, n.beat - n.cross.beat));
           const dx = bx - ax, dy = by - ay, L = dx * dx + dy * dy || 1, u = ((p.x - ax) * dx + (p.y - ay) * dy) / L;
           const fx = ax + dx * u, fy = ay + dy * u, mx = 2 * fx - p.x, my = 2 * fy - p.y;
           const a = Math.max(0.25, 1 - (n.t - now) / VIEW);
@@ -672,6 +782,25 @@
           g.fillText(p.grade.toUpperCase(), p.x, p.y - noteR() * 1.7 - age * 24);
         }
         g.globalAlpha = 1;
+      }
+
+      // a change of tempo is called out a moment before it comes, so the rings' new speed is no surprise
+      // (drawn under the rings and notes, so it never hides one)
+      function drawTempoCalls(now) {
+        if (!def.tempo) return;
+        g.textAlign = 'center'; g.textBaseline = 'middle';
+        for (let i = 1; i < def.tempo.length; i++) {
+          const [b, bpm, call] = def.tempo[i];
+          if (!call) continue;
+          const dt = now - timeOf(b + 1e-6);
+          if (dt < -0.9 || dt > 0.9) continue;
+          const up = bpm > def.tempo[i - 1][1], u = (dt + 0.9) / 1.8;
+          g.globalAlpha = Math.min(1, Math.sin(Math.PI * u) * 1.6) * 0.85;
+          g.fillStyle = rgba(up ? ACCENT : HUES[0], 1);
+          g.font = `${Math.round(Math.min(30, W * 0.06))}px "Dela Gothic One", sans-serif`;
+          g.fillText(`${up ? '▲' : '▼'} BPM ${typeof call === 'string' ? call : bpm}`, F.cx, F.cy + (F.portrait ? 0.8 : 0.48) * F.u * 0.86);
+          g.globalAlpha = 1;
+        }
       }
 
       // the song's name as it starts, and each new section's name as it arrives
@@ -709,7 +838,7 @@
       return {
         id: def.id, title: def.title, jp: def.jp, genre: def.genre, level: def.level, lede: def.lede, hues: def.hues,
         theme, attractFromBar: def.attractFromBar ?? 8, beatsPerBar: BPB, audioFile: def.audioFile,
-        bpm: BPM, bars: def.bars, sections: SECTIONS, chords: CHORDS, chart: CHART,
+        bpm: BPM, bpmLabel: def.bpmLabel, timeOf, beatOf, bpmAt: TM.bpmAt, varies: TM.varies, bars: def.bars, sections: SECTIONS, chords: CHORDS, chart: CHART,
         hitDist(n, x, y) { const [nx, ny] = notePos(n, n.t), d = Math.hypot(nx - x, ny - y); return d <= hitR() ? d : -1; },
         followPos: notePos,
         followReach: () => Math.max(48, noteR() * 3.4),
@@ -738,15 +867,16 @@
           flashV = Math.max(0, flashV - dt * 2.5);
         },
         draw(now, dt) {
-          const beat = now / SPB, bar = Math.floor(beat / BPB), sec = secAt(beat);
+          const beat = beatOf(now), bar = Math.floor(beat / BPB), sec = secAt(beat);
+          nowBeat = beat;
           ctx.now = now; ctx.beat = beat; ctx.bar = bar; ctx.sec = sec; ctx.dt = dt;
           ctx.pulse = def.pulse ? def.pulse(beat) : kit.pulse(beat, def.kickOn ? def.kickOn(bar, sec.name) : true);
           if (now - lastNow < 0.25) {
             for (const d of DROPS) {
-              if (d.t > now && !(d.closeT > lastNow)) { if (d.t > now + 64 * SPB) break; continue; }
+              if (d.t > now && !(d.closeT > lastNow)) { if (d.t > now + 40) break; continue; }
               // drops landing this frame splash; rings that close in burst at their centre
               if (d.t > lastNow && d.t <= now && d.speed > 0 && onScreen(d.x, d.y)) { const [sx, sy] = toScreen(d.x, d.y); burst(sx, sy, HUES[d.hue], d.small ? 0.35 : 0.5, 0.6); }
-              if (d.closeT > lastNow && d.closeT <= now) { const [sx, sy] = toScreen(...ringC(d, (d.closeT - d.t) / SPB)); burst(sx, sy, HUES[d.hue], 0.8, 0.9); }
+              if (d.closeT > lastNow && d.closeT <= now) { const [sx, sy] = toScreen(...ringC(d, d.closeOff)); burst(sx, sy, HUES[d.hue], 0.8, 0.9); }
             }
             // dark notes found by a reveal ring flash once
             for (let i = S.cursor; i < S.notes.length; i++) {
@@ -762,6 +892,7 @@
           const decor = kit.decor();
           drawBase(beat, ctx.pulse);
           if (decor && scene.back) scene.back(ctx);
+          drawTempoCalls(now);
           drawRipples(now);
           if (decor && scene.surface) scene.surface(ctx);
           drawStones(now);
@@ -783,7 +914,7 @@
           if (grade !== 'miss' && S.combo > 0 && S.combo % 50 === 0) waves.push({ x, y, col: HUES[n.drop.hue], combo: S.combo, life: 0 });
           if (scene.hit) scene.hit(ctx, n, grade, x, y);
         },
-        debug: { notePos: (c, t) => notePos(kit.runOf(c) || c, t) },
+        debug: { notePos: (c, t) => notePos(kit.runOf(c) || c, t), fieldPos },
         onNewRun() {
           particles.length = 0; rings.length = 0; waves.length = 0; popups = [];
           autoAim.x = F.cx; autoAim.y = F.cy; lastNow = -Infinity; shakeV = 0; flashV = 0;

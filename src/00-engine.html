@@ -155,11 +155,12 @@
     <p class="lede" id="songLede"></p>
     <ul class="chips" id="songChips"></ul>
     <ul class="how">
-      <li><b>パソコン</b><span>マウスでノーツに合わせ、<kbd>Z</kbd> <kbd>X</kbd> かクリックで叩く</span></li>
+      <li><b>パソコン</b><span>マウスでノーツに合わせ、<kbd>Z</kbd> <kbd>X</kbd> <kbd>C</kbd> <kbd>V</kbd> かクリックで叩く</span></li>
       <li><b>スマホ</b><span>ノーツを直接タップ</span></li>
       <li><b>長押し</b><span>波紋と一緒に動く光を、押したまま追いかける</span></li>
       <li><b>水切り</b><span>跳ねてくる石が着水する点を叩く</span></li>
       <li><b>交点</b><span>二つの波紋が交わる<strong>2点</strong>を同時に叩く。スマホは二本指で2点を同時にタップ。パソコンはマウスを片方に合わせると反対側に鏡の照準が出るので、<kbd>Z</kbd> <kbd>X</kbd> を同時に（クリックとキーでも）</span></li>
+      <li><b>和音</b><span>点線で結ばれた3点・4点を同時に叩く。スマホは指の本数で。パソコンは1点に合わせると残りの点に照準が出るので、点の数だけボタンを同時に（<kbd>Z</kbd> <kbd>X</kbd> <kbd>C</kbd> やクリックとキー）</span></li>
     </ul>
     <label class="check"><input type="checkbox" id="auto"> オートプレイで見る</label>
     <div class="actions">
@@ -322,35 +323,66 @@
       return i;
     },
     sortChart: (chart) => chart.sort((a, b) => a.t - b.t),
+    tempoMap,
     // a soft kick pulse: 1 on the beat, fading through it
     pulse(beat, on) { return beat >= 0 && on ? Math.exp(-(beat - Math.floor(beat)) * 5) : 0; },
   };
+
+  // Beats <-> song seconds. tempo: [[beat, bpm], ...] from beat 0; stops: [[beat, seconds], ...] hold the
+  // beat still for that long just after it (a note on the stop's own beat comes before the stop).
+  function tempoMap(tempo, stops = []) {
+    const ev = [...tempo.slice(1).map(([beat, bpm]) => ({ beat, bpm })), ...stops.map(([beat, dur]) => ({ beat, dur }))].sort((a, b) => a.beat - b.beat || (a.dur ? -1 : 1));
+    let b = 0, t = 0, spb = 60 / tempo[0][1];
+    const P = [{ b: 0, t: 0, spb, bpm: tempo[0][1] }];
+    for (const e of ev) {
+      t += (e.beat - b) * spb; b = e.beat;
+      if (e.dur) { P.push({ b, t: t + e.dur, spb, bpm: P[P.length - 1].bpm, stop: true, from: t }); t += e.dur; } else { spb = 60 / e.bpm; P.push({ b, t, spb, bpm: e.bpm }); }
+    }
+    const at = (beat) => { let p = P[0]; for (const q of P) { if (q.stop ? q.b < beat : q.b <= beat) p = q; else break; } return p; };
+    return {
+      timeOf(beat) { const p = at(beat); return p.t + (beat - p.b) * p.spb; },
+      beatOf(time) {
+        let p = P[0];
+        for (const q of P) {
+          if (q.stop && time >= q.from && time < q.t) return q.b; // stopped
+          if (q.t <= time) p = q; else break;
+        }
+        return p.b + (time - p.t) / p.spb;
+      },
+      bpmAt: (beat) => at(beat).bpm,
+      stopped: (time) => P.some((q) => q.stop && time >= q.from && time < q.t),
+      varies: P.length > 1,
+    };
+  }
 
   function defineSong(factory) {
     const m = factory(kit);
     m.bpb = m.beatsPerBar || 4;
     m.spb = 60 / m.bpm;
-    m.songEnd = m.bars * m.bpb * m.spb + 0.8;
+    if (!m.timeOf) Object.assign(m, tempoMap([[0, m.bpm]]));
+    m.songEnd = m.timeOf(m.bars * m.bpb) + 0.8;
     m.totalJudges = m.chart.reduce((n, c) => n + (c.dur > 0 ? 2 : 1), 0);
     m.no = SONGS.length + 1;
     SONGS.push(m);
   }
 
   // ===== Judging =====
-  const DOUBLE = 0.14; // how close together the two presses of a crossing pair must be (mouse and keys)
-  let pendingPair = null; // a crossing pair half struck by mouse or key: { token, at, partner }
+  const DOUBLE = 0.14; // how close together the presses of a crossing pair or chord must be (mouse and keys)
+  let pendingGroup = null; // a pair or chord partly struck by mouse or keys: { tokens, at, rest }
   const gradeOf = (adt) => (adt <= WIN.perfect ? 'perfect' : adt <= WIN.great ? 'great' : 'good');
 
   function newRun(auto, attract) {
     byChart.clear();
     S.notes = M.chart.map((c) => { const n = { ...c, src: c, end: c.t + c.dur, head: null, tail: null, holding: null, off: 0 }; byChart.set(c, n); return n; });
-    // the two notes where two rings cross know each other
-    const pairs = new Map();
+    // the notes struck together (the two points where two rings cross, or a chord on one ring) know each other
+    const groups = new Map();
     for (const n of S.notes) {
       if (!n.pair) continue;
-      if (pairs.has(n.pair)) { const m = pairs.get(n.pair); m.partner = n; n.partner = m; } else pairs.set(n.pair, n);
+      if (!groups.has(n.pair)) groups.set(n.pair, []);
+      groups.get(n.pair).push(n);
     }
-    pendingPair = null;
+    for (const grp of groups.values()) for (const n of grp) { n.group = grp; if (grp.length === 2 && n.cross) n.partner = grp[0] === n ? grp[1] : grp[0]; }
+    pendingGroup = null;
     S.cursor = 0; S.auto = auto; S.attract = attract;
     S.combo = 0; S.maxCombo = 0; S.weight = 0;
     S.counts = { perfect: 0, great: 0, good: 0, miss: 0 };
@@ -368,19 +400,24 @@
   }
 
   // Strike the earliest note under the aim; a hold remembers `token` so its release can end it.
-  // A crossing pair is two notes at the two points where two rings cross, struck together.
-  // Fingers each strike their own point. A mouse can only aim at one, so with mouse and keys the
-  // second press (another key, or the click) strikes the other point, where the mirror aim sits.
+  // A crossing pair (the two points where two rings cross) and a chord (several points one ring reaches
+  // at once) are struck together. Fingers each strike their own point. A mouse can only aim at one, so
+  // with mouse and keys each further press (another key, or the click) strikes one more of the group,
+  // where the ghost aims sit: a chord of three takes three buttons at once (Z X C, or a click and two keys).
   const pointerToken = (token) => typeof token === 'number';
   function press(token, now) {
     const p = aimOf(token);
-    if (pendingPair && !pointerToken(token) && token !== pendingPair.token && now - pendingPair.at <= DOUBLE && !pendingPair.partner.head) {
-      const n = pendingPair.partner;
-      pendingPair = null;
-      n.head = gradeOf(Math.abs(now - n.t));
-      judge(n, n.head, now);
-      if (!S.attract && !S.auto) audio.tick();
-      return true;
+    if (pendingGroup && !pointerToken(token) && !pendingGroup.tokens.has(token) && now - pendingGroup.at <= DOUBLE) {
+      const n = pendingGroup.rest.find((m) => !m.head);
+      if (n) {
+        pendingGroup.tokens.add(token);
+        n.head = gradeOf(Math.abs(now - n.t));
+        judge(n, n.head, now);
+        if (!S.attract && !S.auto) audio.tick();
+        if (!pendingGroup.rest.some((m) => !m.head)) pendingGroup = null;
+        return true;
+      }
+      pendingGroup = null;
     }
     // the earliest note in reach; among notes due together (the two points of a crossing), the nearest
     let n = null, nd = 0;
@@ -395,7 +432,10 @@
     if (n) {
       const dt = now - n.t;
       n.head = gradeOf(Math.abs(dt));
-      if (n.partner && !n.partner.head && !pointerToken(token)) pendingPair = { token, at: now, partner: n.partner };
+      if (n.group && !pointerToken(token)) {
+        const rest = n.group.filter((m) => m !== n && !m.head);
+        if (rest.length) pendingGroup = { tokens: new Set([token]), at: now, rest };
+      }
       judge(n, n.head, now);
       if (!S.attract && !S.auto) audio.tick();
       if (n.dur > 0) n.holding = token;
@@ -580,14 +620,16 @@
     // Arrangement -> time-sorted events (song seconds).
     function buildSong() {
       const ev = [];
-      const add = (beat, fn, ...a) => ev.push({ t: beat * M.spb, fn, a });
+      const add = (beat, fn, ...a) => ev.push({ t: M.timeOf(beat), fn, a });
       for (let bar = 0; bar < M.bars; bar++) {
         const b0 = bar * M.bpb, ch = M.chords[bar % M.chords.length], name = M.sections[kit.secIndex(M.sections, bar)].name;
-        if (ch.pad && M.song.padOn !== false) add(b0, 'pad', ch.pad, M.bpb * M.spb);
+        if (ch.pad && M.song.padOn !== false) add(b0, 'pad', ch.pad, M.timeOf(b0 + M.bpb) - M.timeOf(b0));
         M.song.arrange(add, bar, b0, ch, name);
       }
-      if (M.song.extra) M.song.extra(add);
-      if (M.song.leadMidi) for (const n of M.chart) { const m = M.song.leadMidi(n); if (m != null) add(n.beat, 'lead', m, n.dur); }
+      // extra(add, addAt): phrases placed by beat, or by song seconds (for sounds inside a stop, when beats stand still)
+      if (M.song.extra) M.song.extra(add, (t, fn, ...a) => ev.push({ t, fn, a }));
+      // each note sounds its own pitch (on the voice leadVoice picks for it, if the song has several)
+      if (M.song.leadMidi) for (const n of M.chart) { const m = M.song.leadMidi(n); if (m != null) add(n.beat, M.song.leadVoice ? M.song.leadVoice(n) : 'lead', m, n.dur); }
       ev.sort((a, b) => a.t - b.t);
       return ev;
     }
@@ -691,7 +733,7 @@
   const fmtScore = (n) => String(n).padStart(7, '0');
   const currentScore = () => Math.round((1e6 * S.weight) / M.totalJudges);
   function drawHud(now) {
-    const beat = now / M.spb;
+    const beat = M.beatOf(now);
     const top = Math.max(12, H * 0.02);
     const paper = hex(M.theme.paper), muted = hex(M.theme.muted);
     g.textBaseline = 'top';
@@ -710,7 +752,9 @@
     const sec = M.sections[kit.secIndex(M.sections, Math.max(0, Math.floor(beat / M.bpb)))];
     g.textAlign = 'right'; g.fillStyle = rgba(muted, 1);
     g.font = '700 12px "Zen Kaku Gothic New", sans-serif';
-    g.fillText(`${M.title} ・ ${sec.name} ・ ${S.auto ? 'AUTO' : 'PLAY'}`, W - 66, top + 12);
+    // narrow screens keep only what changes: the section (and the tempo, if it moves)
+    const bpmText = M.varies ? ` ・ BPM ${Math.round(M.bpmAt(beat))}` : '';
+    g.fillText(W < 560 ? `${sec.name}${bpmText}` : `${M.title} ・ ${sec.name}${bpmText} ・ ${S.auto ? 'AUTO' : 'PLAY'}`, W - 66, top + 12);
     const prog = Math.min(1, Math.max(0, now / (M.songEnd - 0.8)));
     g.fillStyle = rgba(paper, 0.12); g.fillRect(0, 0, W, 3);
     g.fillStyle = M.progressColor ? M.progressColor(beat) : rgba(hex(M.theme.accent), 0.9);
@@ -738,7 +782,7 @@
     if (M !== m) { M = m; applyTheme(m); }
     m.layout(W, H, true);
     newRun(true, true);
-    S.attractT0 = performance.now() / 1000 - m.attractFromBar * m.bpb * m.spb;
+    S.attractT0 = performance.now() / 1000 - m.timeOf(m.attractFromBar * m.bpb);
   }
 
   function setHash(id) {
@@ -823,7 +867,7 @@
     M.layout(W, H, false);
     // the finished run's numbers are on the panel now; let the demo play behind it
     newRun(true, true);
-    S.attractT0 = performance.now() / 1000 - M.attractFromBar * M.bpb * M.spb;
+    S.attractT0 = performance.now() / 1000 - M.timeOf(M.attractFromBar * M.bpb);
     $('#againBtn').focus({ preventScroll: true });
   }
 
@@ -857,7 +901,7 @@
       const no = document.createElement('span'); no.className = 'sc-no'; no.textContent = String(m.no).padStart(2, '0');
       const title = document.createElement('span'); title.className = 'sc-title'; title.textContent = m.title;
       const jp = document.createElement('small'); jp.textContent = m.jp; title.appendChild(jp);
-      const genre = document.createElement('span'); genre.className = 'sc-genre'; genre.textContent = `${m.genre} ・ BPM ${m.bpm}${m.audioFile ? ' ・ 録音' : ''}`;
+      const genre = document.createElement('span'); genre.className = 'sc-genre'; genre.textContent = `${m.genre} ・ BPM ${m.bpmLabel || m.bpm}${m.audioFile ? ' ・ 録音' : ''}`;
       const side = document.createElement('span'); side.className = 'sc-side';
       const bl = document.createElement('span'); bl.className = 'sc-best'; bl.textContent = bestLabel(best[m.id]);
       side.append(levelMeter(m.level), bl);
@@ -879,8 +923,8 @@
     $('#songLede').innerHTML = M.lede;
     const chips = $('#songChips');
     chips.textContent = '';
-    const len = M.bars * M.bpb * M.spb;
-    for (const [k, v] of [['BPM', M.bpm], ['拍子', `${M.bpb}/4`], ['長さ', fmtTime(len)], ['ノーツ', M.chart.length], ['LEVEL', M.level]]) {
+    const len = M.timeOf(M.bars * M.bpb);
+    for (const [k, v] of [['BPM', M.bpmLabel || M.bpm], ['拍子', `${M.bpb}/4`], ['長さ', fmtTime(len)], ['ノーツ', M.chart.length], ['LEVEL', M.level]]) {
       const li = document.createElement('li'); li.textContent = k;
       const b = document.createElement('b'); b.textContent = v; li.appendChild(b);
       chips.appendChild(li);
@@ -938,6 +982,7 @@
   }
 
   // ===== Input (aim: mouse + Z/X or click; touch taps the note) =====
+  const HIT_KEYS = new Set(['KeyZ', 'KeyX', 'KeyC', 'KeyV']);
   const aimPointers = new Map();
   const aimOf = (token) => aimPointers.get(token) || S.aim;
   const playing = () => S.screen === 'play' && !S.auto && !S.paused;
@@ -947,7 +992,7 @@
     if (S.screen === 'play') {
       if (e.code === 'Escape' || e.code === 'KeyP') { e.preventDefault(); if (S.paused) resumeGame(); else pauseGame(); return; }
       if (S.auto || S.paused) return;
-      if (e.code === 'KeyZ' || e.code === 'KeyX') { e.preventDefault(); if (!e.repeat) press(e.code, audio.songTime()); }
+      if (HIT_KEYS.has(e.code)) { e.preventDefault(); if (!e.repeat) press(e.code, audio.songTime()); }
     } else if (S.screen === 'title') {
       if (e.code === 'Escape') { showMenu(); return; }
       const t = e.target;
@@ -956,7 +1001,7 @@
   });
   window.addEventListener('keyup', (e) => {
     if (S.screen !== 'play' || S.auto || S.paused) return;
-    if (e.code === 'KeyZ' || e.code === 'KeyX') release(e.code, audio.songTime());
+    if (HIT_KEYS.has(e.code)) release(e.code, audio.songTime());
   });
   window.addEventListener('pointermove', (e) => {
     if (e.pointerType === 'mouse') { S.aim.x = e.clientX; S.aim.y = e.clientY; S.touch = false; }
@@ -1044,8 +1089,8 @@
       now = ts / 1000 - S.attractT0;
       if (now > M.songEnd - 1) {
         newRun(true, true);
-        S.attractT0 = ts / 1000 - M.attractFromBar * M.bpb * M.spb;
-        now = M.attractFromBar * M.bpb * M.spb;
+        S.attractT0 = ts / 1000 - M.timeOf(M.attractFromBar * M.bpb);
+        now = M.timeOf(M.attractFromBar * M.bpb);
       }
     }
     M.update(now, dt);
