@@ -36,7 +36,7 @@
       const BS = [[-0.45, -0.18], [0.45, 0.18], [-0.45, 0.18], [0.45, -0.18], [-0.2, 0], [0.25, 0]];
       BS.forEach((p, k) => drop(B(4 + k), p, k % 4, k % 2 ? '..oo.o.o' : '..o.oo.o', { a: p[0] < 0 ? 0 : 180, turn: p[1] < 0 ? -45 : 45 }));
       skip(B(10), [0.6, -0.32], [-0.5, 0.2], 1, 'o.o.o.oo');
-      skip(B(11), [-0.6, 0.3], [0.5, -0.2], 2, 'o.oooooo', { decay: 0.92 });
+      skip(B(11), [-0.6, 0.38], [0.55, 0.05], 2, 'o.oooooo');
       // DROP: four-bar blocks: a run that heads for the middle, a skipping stream that carries on
       // from where it ended, a spiral hold, and a run from the other side
       const block = (bar, k) => {
@@ -45,7 +45,7 @@
         const hit = [0.35 * s, -0.62];
         UZU_SHOCK.set(B(bar), hit);
         drop(B(bar), hit, (k * 2) % 4, '..oo.oo.', { speed: 0.3, r0: 0.1, angs: [90 + 28 * s, 90 + 12 * s, 90 - 4 * s, 90 - 14 * s] });
-        skip(B(bar + 1), [0.45 * s, 0.32], [-0.5 * s, -0.25], (k * 2 + 1) % 4, 'oooooooo', { decay: 0.94 });
+        skip(B(bar + 1), [0.45 * s, 0.32], [-0.5 * s, -0.25], (k * 2 + 1) % 4, 'oooooooo');
         // the current carries this ring round the eye while the hold circles it
         const orbit = [1, 2, 3, 4].map((o) => { const a = Math.atan2(0.15, -0.25 * s) - o * 0.55 * s; return [o, Math.cos(a) * 0.29, Math.sin(a) * 0.2]; });
         drop(B(bar + 2), [-0.25 * s, 0.15], (k * 2 + 2) % 4, '..S---', { a: s < 0 ? 180 : 0, spin: 200 * s, turn: 60, path: orbit, ease: 'linear' });
@@ -57,8 +57,8 @@
       drop(B(28), [0, 0], 1, '..S-------', { a: -90, speed: 0.09, spin: 300 });
       drop(B(30), [0, 0.02], 3, '..H---.o.o', { a: 90, speed: 0.09, turn: 80 });
       // BUILD II: stones faster and faster
-      skip(B(32), [-0.65, -0.3], [0.6, 0.3], 0, 'o...o...o.o.o.o.', { decay: 0.97 });
-      skip(B(34), [0.65, -0.3], [-0.6, 0.3], 3, 'o.o.o.o.oooooooo', { decay: 0.97 });
+      skip(B(32), [-0.65, -0.3], [0.6, 0.3], 0, 'o...o...o.o.o.o.');
+      skip(B(34), [0.65, -0.3], [-0.6, 0.3], 3, 'o.o.o.o.oooooooo');
       // DROP II: the blocks again, mirrored, then a closing barrage of runs
       [36, 40].forEach((bar, k) => block(bar, k + 1));
       const R = [[0.4, 0.15], [-0.4, -0.15], [0.4, -0.15], [-0.4, 0.15]];

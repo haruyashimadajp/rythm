@@ -40,7 +40,7 @@
         KOORI_SKATE.push(drop(B(8 + k * 2), p, k % 4, pat, { a: p[0] < 0 ? 0 : 180, turn: k % 2 ? -55 : 55, path: [[2.5, mid[0], mid[1]], [5, end[0], end[1]]] }));
       });
       // BRIDGE: stones slide across the ice, and slow rings to ride round
-      skip(B(24), [-0.65, -0.3], [0.6, 0.3], 1, 'o.o.o.o.o.o.', { decay: 0.95 });
+      skip(B(24), [-0.65, -0.3], [0.6, 0.3], 1, 'o.o.o.o.o.o.');
       drop(B(26), [0, 0], 3, '..S-----', { a: -90, speed: 0.08, spin: 180 });
       // a ring that freezes: it slows to a stop, and its notes crowd together at the edge
       drop(B(28), [0.05, 0], 2, '..o.o.o.o.', { speed: 0.22, accel: -0.06, a: -90, turn: 80 });

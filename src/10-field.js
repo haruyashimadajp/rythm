@@ -170,24 +170,23 @@
       }
       // skip(beat, from, to, hue, pattern): a stone skips across the water from `from` towards `to`,
       // landing on each 'o' (8th steps, or opts.step); each landing is a note on the spot it lands.
-      // The skips shorten as the stone slows (opts.decay).
+      // The stone flies at an even pace, so the distance between landings follows the rhythm: a skip
+      // twice as long in time is twice as long on the water, and quick skips sit close together.
       function skip(beat, [x0, y0], [x1, y1], hue, pattern, o = {}) {
-        const step = o.step ?? 0.5, decay = o.decay ?? 0.85;
+        const step = o.step ?? 0.5;
         const seq = pattern.replace(/[|\s]/g, '');
         const hits = [];
         for (let i = 0; i < seq.length; i++) if (seq[i] === 'o') hits.push(i * step);
-        const gaps = [];
-        let sum = 0;
-        for (let k = 0; k < hits.length - 1; k++) { gaps.push(Math.pow(decay, k)); sum += gaps[k]; }
-        let acc = 0, prev = null;
-        hits.forEach((off, k) => {
-          const u = sum ? acc / sum : 0;
-          if (k < gaps.length) acc += gaps[k];
+        const span = hits.length > 1 ? hits[hits.length - 1] - hits[0] : 0;
+        const len = Math.hypot(x1 - x0, y1 - y0) || 1;
+        let prev = null;
+        hits.forEach((off) => {
+          const u = span ? (off - hits[0]) / span : 0;
           const x = x0 + (x1 - x0) * u, y = y0 + (y1 - y0) * u;
           if (!inField(x, y)) console.warn(`${def.id}: skip at beat ${beat + off} lands outside the field`);
-          // the first skip comes in from outside along the same line
-          const lead = sum ? (gaps[0] / sum) * 1.3 : 0.25;
-          const from = prev || { x: x - (x1 - x0) * lead, y: y - (y1 - y0) * lead, beat: beat + off - Math.max(1, step * 2) };
+          // the first skip comes in from outside along the same line, at the same pace
+          const pre = Math.max(1, step * 2), lead = span ? Math.min(0.45, (len / span) * pre) / len : 0.25;
+          const from = prev || { x: x - (x1 - x0) * lead, y: y - (y1 - y0) * lead, beat: beat + off - pre };
           const d = newDrop(beat + off, x, y, hue, { speed: 0.08, dark: o.dark });
           d.small = true; d.stone = from;
           d.notes.push({ off: 0, offEnd: 0, ang: 0, spin: 0, skip: true });

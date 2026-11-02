@@ -1235,24 +1235,23 @@
       }
       // skip(beat, from, to, hue, pattern): a stone skips across the water from `from` towards `to`,
       // landing on each 'o' (8th steps, or opts.step); each landing is a note on the spot it lands.
-      // The skips shorten as the stone slows (opts.decay).
+      // The stone flies at an even pace, so the distance between landings follows the rhythm: a skip
+      // twice as long in time is twice as long on the water, and quick skips sit close together.
       function skip(beat, [x0, y0], [x1, y1], hue, pattern, o = {}) {
-        const step = o.step ?? 0.5, decay = o.decay ?? 0.85;
+        const step = o.step ?? 0.5;
         const seq = pattern.replace(/[|\s]/g, '');
         const hits = [];
         for (let i = 0; i < seq.length; i++) if (seq[i] === 'o') hits.push(i * step);
-        const gaps = [];
-        let sum = 0;
-        for (let k = 0; k < hits.length - 1; k++) { gaps.push(Math.pow(decay, k)); sum += gaps[k]; }
-        let acc = 0, prev = null;
-        hits.forEach((off, k) => {
-          const u = sum ? acc / sum : 0;
-          if (k < gaps.length) acc += gaps[k];
+        const span = hits.length > 1 ? hits[hits.length - 1] - hits[0] : 0;
+        const len = Math.hypot(x1 - x0, y1 - y0) || 1;
+        let prev = null;
+        hits.forEach((off) => {
+          const u = span ? (off - hits[0]) / span : 0;
           const x = x0 + (x1 - x0) * u, y = y0 + (y1 - y0) * u;
           if (!inField(x, y)) console.warn(`${def.id}: skip at beat ${beat + off} lands outside the field`);
-          // the first skip comes in from outside along the same line
-          const lead = sum ? (gaps[0] / sum) * 1.3 : 0.25;
-          const from = prev || { x: x - (x1 - x0) * lead, y: y - (y1 - y0) * lead, beat: beat + off - Math.max(1, step * 2) };
+          // the first skip comes in from outside along the same line, at the same pace
+          const pre = Math.max(1, step * 2), lead = span ? Math.min(0.45, (len / span) * pre) / len : 0.25;
+          const from = prev || { x: x - (x1 - x0) * lead, y: y - (y1 - y0) * lead, beat: beat + off - pre };
           const d = newDrop(beat + off, x, y, hue, { speed: 0.08, dark: o.dark });
           d.small = true; d.stone = from;
           d.notes.push({ off: 0, offEnd: 0, ang: 0, spin: 0, skip: true });
@@ -2360,7 +2359,7 @@
         KOORI_SKATE.push(drop(B(8 + k * 2), p, k % 4, pat, { a: p[0] < 0 ? 0 : 180, turn: k % 2 ? -55 : 55, path: [[2.5, mid[0], mid[1]], [5, end[0], end[1]]] }));
       });
       // BRIDGE: stones slide across the ice, and slow rings to ride round
-      skip(B(24), [-0.65, -0.3], [0.6, 0.3], 1, 'o.o.o.o.o.o.', { decay: 0.95 });
+      skip(B(24), [-0.65, -0.3], [0.6, 0.3], 1, 'o.o.o.o.o.o.');
       drop(B(26), [0, 0], 3, '..S-----', { a: -90, speed: 0.08, spin: 180 });
       // a ring that freezes: it slows to a stop, and its notes crowd together at the edge
       drop(B(28), [0.05, 0], 2, '..o.o.o.o.', { speed: 0.22, accel: -0.06, a: -90, turn: 80 });
@@ -2956,7 +2955,7 @@
       const BS = [[-0.45, -0.18], [0.45, 0.18], [-0.45, 0.18], [0.45, -0.18], [-0.2, 0], [0.25, 0]];
       BS.forEach((p, k) => drop(B(4 + k), p, k % 4, k % 2 ? '..oo.o.o' : '..o.oo.o', { a: p[0] < 0 ? 0 : 180, turn: p[1] < 0 ? -45 : 45 }));
       skip(B(10), [0.6, -0.32], [-0.5, 0.2], 1, 'o.o.o.oo');
-      skip(B(11), [-0.6, 0.3], [0.5, -0.2], 2, 'o.oooooo', { decay: 0.92 });
+      skip(B(11), [-0.6, 0.38], [0.55, 0.05], 2, 'o.oooooo');
       // DROP: four-bar blocks: a run that heads for the middle, a skipping stream that carries on
       // from where it ended, a spiral hold, and a run from the other side
       const block = (bar, k) => {
@@ -2965,7 +2964,7 @@
         const hit = [0.35 * s, -0.62];
         UZU_SHOCK.set(B(bar), hit);
         drop(B(bar), hit, (k * 2) % 4, '..oo.oo.', { speed: 0.3, r0: 0.1, angs: [90 + 28 * s, 90 + 12 * s, 90 - 4 * s, 90 - 14 * s] });
-        skip(B(bar + 1), [0.45 * s, 0.32], [-0.5 * s, -0.25], (k * 2 + 1) % 4, 'oooooooo', { decay: 0.94 });
+        skip(B(bar + 1), [0.45 * s, 0.32], [-0.5 * s, -0.25], (k * 2 + 1) % 4, 'oooooooo');
         // the current carries this ring round the eye while the hold circles it
         const orbit = [1, 2, 3, 4].map((o) => { const a = Math.atan2(0.15, -0.25 * s) - o * 0.55 * s; return [o, Math.cos(a) * 0.29, Math.sin(a) * 0.2]; });
         drop(B(bar + 2), [-0.25 * s, 0.15], (k * 2 + 2) % 4, '..S---', { a: s < 0 ? 180 : 0, spin: 200 * s, turn: 60, path: orbit, ease: 'linear' });
@@ -2977,8 +2976,8 @@
       drop(B(28), [0, 0], 1, '..S-------', { a: -90, speed: 0.09, spin: 300 });
       drop(B(30), [0, 0.02], 3, '..H---.o.o', { a: 90, speed: 0.09, turn: 80 });
       // BUILD II: stones faster and faster
-      skip(B(32), [-0.65, -0.3], [0.6, 0.3], 0, 'o...o...o.o.o.o.', { decay: 0.97 });
-      skip(B(34), [0.65, -0.3], [-0.6, 0.3], 3, 'o.o.o.o.oooooooo', { decay: 0.97 });
+      skip(B(32), [-0.65, -0.3], [0.6, 0.3], 0, 'o...o...o.o.o.o.');
+      skip(B(34), [0.65, -0.3], [-0.6, 0.3], 3, 'o.o.o.o.oooooooo');
       // DROP II: the blocks again, mirrored, then a closing barrage of runs
       [36, 40].forEach((bar, k) => block(bar, k + 1));
       const R = [[0.4, 0.15], [-0.4, -0.15], [0.4, -0.15], [-0.4, 0.15]];
@@ -3869,7 +3868,7 @@
       skip(192, [0.55, 0.25], [-0.6, -0.25], GR, 'o.o.o.o.');
       skip(196, [-0.65, 0.3], [0.6, -0.25], CY, 'o.o.o.o.');
       skip(200, [0.65, 0.3], [-0.6, -0.25], GR, 'o.o.oooo');
-      skip(204, [-0.45, -0.05], [0.2, 0.25], CY, 'oooo', { decay: 0.95 });
+      skip(204, [-0.45, -0.05], [0.2, 0.25], CY, 'oooo');
       cur = { beat: 205.5, p: [0.2, 0.25] };
       // DROP 2: the blocks again, a step higher and more infected
       for (let b = 208; b < 272; b += 16) block(SCORE_MALWARE.drop2, b, [RD, RD, YE]);
