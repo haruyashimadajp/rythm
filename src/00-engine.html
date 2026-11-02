@@ -203,6 +203,7 @@
       </div>
       <label class="check"><input type="checkbox" id="bg"> 背景の演出（鯉、花火、雪、オーロラなど）</label>
       <label class="check"><input type="checkbox" id="fx"> 画面の揺れとフラッシュ</label>
+      <label class="check"><input type="checkbox" id="order"> ノーツに押す順番の数字（小節ごと）</label>
     </div>
     <div class="actions">
       <button class="btn primary" id="setBack" type="button">戻る</button>
@@ -282,7 +283,7 @@
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   // ----- Settings and best scores (both stay on this device) -----
-  const settings = { speed: 1, offset: 0, auto: false, volume: 0.8, se: 0.6, bg: true, fx: true };
+  const settings = { speed: 1, offset: 0, auto: false, volume: 0.8, se: 0.6, bg: true, fx: true, order: true };
   const load = (key, into) => { try { Object.assign(into, JSON.parse(localStorage.getItem(key) || '{}')); } catch (e) { /* storage unavailable */ } };
   const save = (key, v) => { try { localStorage.setItem(key, JSON.stringify(v)); } catch (e) { /* ignore */ } };
   load('minamo.settings', settings);
@@ -309,6 +310,7 @@
     playing: () => S.screen === 'play',
     decor: () => settings.bg !== false, // background scenery on (settings)
     fx: () => settings.fx !== false && !reduceMotion, // screen shake and flashes on
+    order: () => settings.order !== false, // order numbers on the notes
     // wide screens keep the panel on the left outside of play, so songs shift their field right
     wide: () => W >= 900 && S.screen !== 'play',
     view: (base) => base / settings.speed,
@@ -380,12 +382,18 @@
       if (!S.attract && !S.auto) audio.tick();
       return true;
     }
+    // the earliest note in reach; among notes due together (the two points of a crossing), the nearest
+    let n = null, nd = 0;
     for (let i = S.cursor; i < S.notes.length; i++) {
-      const n = S.notes[i];
-      if (n.t > now + WIN.good) break;
-      if (n.head || !M.hitTest(n, p.x, p.y)) continue;
+      const c = S.notes[i];
+      if (c.t > now + WIN.good || (n && c.t > n.t + 0.002)) break;
+      if (c.head || Math.abs(now - c.t) > WIN.good) continue;
+      const d = M.hitDist(c, p.x, p.y);
+      if (d < 0 || (n && d >= nd)) continue;
+      n = c; nd = d;
+    }
+    if (n) {
       const dt = now - n.t;
-      if (Math.abs(dt) > WIN.good) continue;
       n.head = gradeOf(Math.abs(dt));
       if (n.partner && !n.partner.head && !pointerToken(token)) pendingPair = { token, at: now, partner: n.partner };
       judge(n, n.head, now);
@@ -972,13 +980,13 @@
   window.addEventListener('pointercancel', endPointer);
 
   // ----- Settings UI -----
-  const speed = $('#speed'), offset = $('#offset'), auto = $('#auto'), volume = $('#volume'), se = $('#se'), bg = $('#bg'), fx = $('#fx');
+  const speed = $('#speed'), offset = $('#offset'), auto = $('#auto'), volume = $('#volume'), se = $('#se'), bg = $('#bg'), fx = $('#fx'), order = $('#order');
   const syncUi = () => {
     volume.value = Math.round(settings.volume * 100); $('#volumeOut').textContent = `${Math.round(settings.volume * 100)}%`;
     se.value = Math.round(settings.se * 100); $('#seOut').textContent = `${Math.round(settings.se * 100)}%`;
     speed.value = settings.speed; $('#speedOut').textContent = Number(settings.speed).toFixed(1);
     offset.value = settings.offset; $('#offsetOut').textContent = `${settings.offset > 0 ? '+' : ''}${settings.offset} ms`;
-    auto.checked = !!settings.auto; bg.checked = settings.bg !== false; fx.checked = settings.fx !== false;
+    auto.checked = !!settings.auto; bg.checked = settings.bg !== false; fx.checked = settings.fx !== false; order.checked = settings.order !== false;
   };
   const saveSettings = () => save('minamo.settings', settings);
   volume.addEventListener('input', () => { settings.volume = +volume.value / 100; syncUi(); saveSettings(); audio.setVolume(); });
@@ -989,6 +997,7 @@
   auto.addEventListener('change', () => { settings.auto = auto.checked; saveSettings(); });
   bg.addEventListener('change', () => { settings.bg = bg.checked; saveSettings(); });
   fx.addEventListener('change', () => { settings.fx = fx.checked; saveSettings(); });
+  order.addEventListener('change', () => { settings.order = order.checked; saveSettings(); });
   $('#menuSettingsBtn').addEventListener('click', () => openSettings(menuWrap));
   $('#titleSettingsBtn').addEventListener('click', () => openSettings(titleWrap));
   $('#pauseSettingsBtn').addEventListener('click', () => openSettings(pauseWrap));

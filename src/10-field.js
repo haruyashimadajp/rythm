@@ -213,6 +213,16 @@
       }
       DROPS.sort((a, b) => a.t - b.t);
       kit.sortChart(CHART);
+      // the order to strike them in, counted afresh each bar; the two points of a crossing share a number
+      {
+        let bar = -1, k = 0, lastT = -1;
+        for (const c of CHART) {
+          const b = Math.floor(c.beat / BPB + 1e-6);
+          if (b !== bar) { bar = b; k = 0; lastT = -1; }
+          if (Math.abs(c.t - lastT) > 0.002) k++;
+          c.order = k; c.bar = b; lastT = c.t;
+        }
+      }
 
       // where a note sits (field units), or for a hold, where the ripple front is along it at time t
       function fieldPos(n, t) {
@@ -263,6 +273,8 @@
       // field units -> screen; on tall screens the field turns a quarter
       const toScreen = (x, y) => (F.portrait ? [F.cx - y * F.u, F.cy + x * F.u] : [F.cx + x * F.u, F.cy + y * F.u]);
       const noteR = () => Math.max(15, F.u * 0.045);
+      // how far from a note a press still counts (generous: a little over twice the note's size)
+      const hitR = () => Math.max(40, noteR() * 2.7);
       const notePos = (n, t) => { const [x, y] = fieldPos(n, t); return toScreen(x, y); };
       const secAt = (beat) => SECTIONS[kit.secIndex(SECTIONS, Math.max(0, Math.floor(beat / BPB)))];
 
@@ -548,19 +560,26 @@
             g.beginPath(); g.moveTo(x, y); g.lineTo(qx, qy); g.stroke();
             g.setLineDash([]);
           }
+          const num = kit.order() && n.order;
           if (n.cross) {
             // a crossing: the other ring's colour outside, and a star of white light
             g.strokeStyle = rgba(HUES[n.cross.hue], 1); g.lineWidth = 3;
             g.beginPath(); g.arc(x, y, r * 1.28, 0, TAU); g.stroke();
-            g.fillStyle = rgba(PAPER, 0.95);
+            g.fillStyle = rgba(PAPER, num ? 0.3 : 0.95);
             g.beginPath();
-            for (let q = 0; q < 8; q++) { const a = (q * TAU) / 8, rr = q % 2 ? r * 0.16 : r * (0.5 + 0.2 * k); g.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr); }
+            for (let q = 0; q < 8; q++) { const a = (q * TAU) / 8, rr = q % 2 ? r * 0.16 : r * (num ? 0.85 : 0.5 + 0.2 * k); g.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr); }
             g.fill();
           } else if (n.jack) {
-            // a pulse train: how many rings are still to come
-            g.fillStyle = rgba(PAPER, 0.95); g.textAlign = 'center'; g.textBaseline = 'middle';
-            g.font = `${Math.round(r * 0.8)}px "Dela Gothic One", sans-serif`;
-            g.fillText(String(n.jack.n - n.jack.k), x, y + 1);
+            // a pulse train: how many rings are still to come (pips round the rim when the order number is inside)
+            const left = n.jack.n - n.jack.k;
+            if (num) {
+              g.fillStyle = rgba(PAPER, 0.95);
+              for (let q = 0; q < left; q++) { const a = -TAU / 4 + (q * TAU) / Math.max(left, 6); g.beginPath(); g.arc(x + Math.cos(a) * r * 1.3, y + Math.sin(a) * r * 1.3, Math.max(2, r * 0.13), 0, TAU); g.fill(); }
+            } else {
+              g.fillStyle = rgba(PAPER, 0.95); g.textAlign = 'center'; g.textBaseline = 'middle';
+              g.font = `${Math.round(r * 0.8)}px "Dela Gothic One", sans-serif`;
+              g.fillText(String(left), x, y + 1);
+            }
           } else if (n.skip) {
             // a landing mark: four ticks around the ring
             g.lineWidth = 2;
@@ -569,14 +588,23 @@
               g.beginPath(); g.moveTo(x + Math.cos(a) * r * 1.15, y + Math.sin(a) * r * 1.15); g.lineTo(x + Math.cos(a) * r * 1.5, y + Math.sin(a) * r * 1.5); g.stroke();
             }
           } else if (n.dur > 0) {
-            // a hold's head shows which way the light will travel
+            // a hold's head shows which way the light will travel (on the rim when the order number is inside)
             const [qx, qy] = notePos(n, n.t + Math.min(n.dur, SPB * 0.25)), a = Math.atan2(qy - y, qx - x);
+            const c0 = num ? r * 1.25 : 0, s0 = num ? 1.15 : 1;
+            const ox = x + Math.cos(a) * c0, oy = y + Math.sin(a) * c0;
             g.fillStyle = rgba(PAPER, 0.9);
-            g.beginPath(); g.moveTo(x + Math.cos(a) * r * 0.55, y + Math.sin(a) * r * 0.55);
-            g.lineTo(x + Math.cos(a + 2.4) * r * 0.4, y + Math.sin(a + 2.4) * r * 0.4); g.lineTo(x + Math.cos(a - 2.4) * r * 0.4, y + Math.sin(a - 2.4) * r * 0.4);
+            g.beginPath(); g.moveTo(ox + Math.cos(a) * r * 0.55 * s0, oy + Math.sin(a) * r * 0.55 * s0);
+            g.lineTo(ox + Math.cos(a + 2.4) * r * 0.4 * s0, oy + Math.sin(a + 2.4) * r * 0.4 * s0); g.lineTo(ox + Math.cos(a - 2.4) * r * 0.4 * s0, oy + Math.sin(a - 2.4) * r * 0.4 * s0);
             g.fill();
           }
-          if ((n.dur === 0 || n.skip) && !n.cross && !n.jack) {
+          if (num) {
+            // the order to strike in, counted afresh each bar; the next bar's numbers wait a little dimmer
+            const later = next && n.bar !== next.bar;
+            g.fillStyle = rgba(PAPER, later ? 0.55 : 1); g.textAlign = 'center'; g.textBaseline = 'middle';
+            g.font = `${Math.round(r * (num > 9 ? 0.85 : 1.05))}px "Dela Gothic One", sans-serif`;
+            g.lineWidth = 3; g.strokeStyle = rgba(INK, 0.6); g.lineJoin = 'round';
+            g.strokeText(String(num), x, y + 1); g.fillText(String(num), x, y + 1);
+          } else if ((n.dur === 0 || n.skip) && !n.cross && !n.jack) {
             g.fillStyle = rgba(PAPER, 0.9);
             g.beginPath(); g.arc(x, y, r * 0.18, 0, TAU); g.fill();
           }
@@ -683,9 +711,9 @@
         id: def.id, title: def.title, jp: def.jp, genre: def.genre, level: def.level, lede: def.lede, hues: def.hues,
         theme, attractFromBar: def.attractFromBar ?? 8, beatsPerBar: BPB, audioFile: def.audioFile,
         bpm: BPM, bars: def.bars, sections: SECTIONS, chords: CHORDS, chart: CHART,
-        hitTest(n, x, y) { const [nx, ny] = notePos(n, n.t); return Math.hypot(nx - x, ny - y) <= noteR() * 1.8; },
+        hitDist(n, x, y) { const [nx, ny] = notePos(n, n.t), d = Math.hypot(nx - x, ny - y); return d <= hitR() ? d : -1; },
         followPos: notePos,
-        followReach: () => noteR() * 2.6,
+        followReach: () => Math.max(48, noteR() * 3.4),
         progressColor: (beat) => rgba(HUES[secAt(beat).hue], 0.9),
         song: { ...def.song, leadMidi },
         onAudioStart(A, at) { if (def.song.start) def.song.start(A, at); },
