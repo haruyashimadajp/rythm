@@ -16,8 +16,8 @@
   //   - other chord stabs are chords on one ring: 2, 3 or 4 notes it
   //     reaches at once (triangles and squares come from the augmented
   //     and diminished chords, which are symmetric themselves)
-  //   - a drum roll is a jack on one spot; a hoover trill alternates
-  //     two spots
+  //   - rapid hits (a drum roll, a hoover trill) alternate between two
+  //     spots side by side, one for each thumb
   //   - on the dial, each pitch has its own hour (D at twelve, E at two,
   //     F at three ... C sharp at eleven), so a chromatic run goes once
   //     round the clock
@@ -177,8 +177,7 @@
         if (k === 0) sweep(b4, 'down', h, theme[3].map(([q, m, hh]) => (hh ? [q, m, 1] : [q, m])));
         else if (k === 1) {
           // a hoover trill: two spots in turn, 16ths, then the chord they were trilling
-          pulse(b4 - 1, [-0.25, -0.12], h, { n: 4, gap: 0.5, off: 1, a: -90, speed: 0.15, midi: 76 });
-          pulse(b4 - 0.75, [-0.1, -0.12], (h + 1) % 4, { n: 4, gap: 0.5, off: 1, a: -90, speed: 0.15, midi: 73 });
+          pulse(b4 - 1, [-0.17, -0.12], h, { n: 8, gap: 0.25, off: 1, a: -90, speed: 0.15, midi: [76, 73] });
           const d = drop(b4 + 1.5, [-0.15, 0.05], h, '', { speed: 0.13 });
           chord(b4 + 2.5, d, tri(0), { midi: [69, 73, 76] });
         } else if (k === 2) {
@@ -241,7 +240,7 @@
       drop(B(39) - 0.5, [0.05, 0.04], 1, '.o.H---', { speed: -0.1, r0: 0.38, a: -20, turn: -50, midi: [73, 74] });
 
       // ===== RESTART (105 -> 240): one spot struck every beat while the clock revs =====
-      pulse(B(40) - 1, [0, 0.03], 0, { n: 8, gap: 1, off: 1, a: -90, speed: 0.15, midi: [50, 50, 53, 53, 57, 57, 61, 62] });
+      pulse(B(40) - 1, [-0.2, 0.03], 0, { n: 8, gap: 1, off: 1, a: -90, speed: 0.15, midi: [50, 50, 53, 53, 57, 57, 61, 62] });
 
       // ===== LIMIT (240): three blocks; the line runs up, across, up, then a fill =====
       const limit = (bar, j, theme) => {
@@ -252,8 +251,7 @@
         const b4 = B(bar + 3), h = (j + 1) % 4;
         if (j === 0) {
           // an 8th trill between two spots, then a triangle
-          pulse(b4 - 1, [0.22, -0.4], h, { n: 3, gap: 1, off: 1, a: 90, speed: 0.15, midi: 76 });
-          pulse(b4 - 0.5, [0.38, -0.4], (h + 1) % 4, { n: 3, gap: 1, off: 1, a: 90, speed: 0.15, midi: 73 });
+          pulse(b4 - 1, [0.3, -0.4], h, { n: 6, gap: 0.5, off: 1, a: 90, speed: 0.15, midi: [76, 73] });
           const d = drop(b4 + 2, [0.45, 0.05], h, '', { speed: 0.14 });
           chord(b4 + 3, d, tri(0), { midi: [69, 73, 76] });
         } else if (j === 1) {

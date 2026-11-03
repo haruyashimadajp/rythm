@@ -110,6 +110,9 @@
       function drop(beat, [x, y], hue, pattern, o = {}) {
         const step = o.step ?? 0.5, turn = o.turn ?? 70, spin = (o.spin ?? 120) * DEG;
         const d = newDrop(beat, x, y, hue, o);
+        // problems are kept on the drop (d.warn) and printed unless opts.quiet (a chart trying layouts)
+        d.warn = [];
+        const warn = (msg) => { d.warn.push(msg); if (!o.quiet) console.warn(msg); };
         const seq = pattern.replace(/[|\s]/g, '');
         let ang = (o.a ?? -90) * DEG, prevOff = null, prev = null, ni = 0;
         for (let i = 0; i < seq.length; i++) {
@@ -119,7 +122,7 @@
           if (c !== 'o') { let j = i + 1; while (j < seq.length && seq[j] === '-') j++; len = j - i; }
           const off = i * step, offEnd = (i + len) * step, sp = c === 'S' ? spin : 0;
           const at = (a, u) => ringPoint(d, off + (offEnd - off) * u, a + sp * u);
-          if (ringR(d, off) <= 0 || ringR(d, offEnd) <= 0) console.warn(`${def.id}: drop at beat ${beat}: note ${off} comes after its ring has closed`);
+          if (ringR(d, off) <= 0 || ringR(d, offEnd) <= 0) warn(`${def.id}: drop at beat ${beat}: note ${off} comes after its ring has closed`);
           const fits = (a) => {
             // keep clear of the note before, so two notes never sit on top of each other
             if (prev) { const [px, py] = at(a, 0); if (Math.hypot(px - prev[0], py - prev[1]) < 0.1) return false; }
@@ -129,14 +132,14 @@
           let a;
           if (o.angs) {
             a = o.angs[ni] * DEG;
-            if (!fits(a)) console.warn(`${def.id}: drop at beat ${beat}: note ${off} at angle ${o.angs[ni]} does not fit`);
+            if (!fits(a)) warn(`${def.id}: drop at beat ${beat}: note ${off} at angle ${o.angs[ni]} does not fit`);
           } else {
             if (prevOff !== null) ang += turn * DEG * (off - prevOff) * (0.3 / Math.max(Math.abs(ringR(d, off)), 0.15));
             a = ang;
             for (let k = 1; k <= 24 && !fits(a); k++) a = ang + Math.ceil(k / 2) * (k % 2 ? 1 : -1) * 15 * DEG;
-            if (!fits(a)) console.warn(`${def.id}: drop at beat ${beat}: note ${off} does not fit`);
+            if (!fits(a)) warn(`${def.id}: drop at beat ${beat}: note ${off} does not fit`);
           }
-          if (!d.path && inField(x, y) && d.speed > 0 && ringR(d, offEnd) > 0.62) console.warn(`${def.id}: drop at beat ${beat}: note ${off} is ${ringR(d, offEnd).toFixed(2)} out; split the drop`);
+          if (!d.path && inField(x, y) && d.speed > 0 && ringR(d, offEnd) > 0.62) warn(`${def.id}: drop at beat ${beat}: note ${off} is ${ringR(d, offEnd).toFixed(2)} out; split the drop`);
           d.notes.push({ off, offEnd, ang: a, spin: sp, midi: o.midi ? o.midi[ni] : undefined });
           prev = at(a, 1);
           ang = a + sp;
@@ -148,16 +151,38 @@
       // wave(beat, [x, y], hue, opts): a ring with no notes of its own (a sonar sweep, a shock wave);
       // with opts.reveal it uncovers dark notes as it passes them.
       const wave = (beat, p, hue, o = {}) => drop(beat, p, hue, '', o);
-      // pulse(beat, [x, y], hue, opts): a pulse train of opts.n rings, opts.gap beats apart, that strike
-      // one spot (angle opts.a) again and again; the first ring reaches it at opts.off beats.
+      // pulse(beat, [x, y], hue, opts): rapid hits, opts.n of them, opts.gap beats apart; the first ring reaches
+      // its spot (angle opts.a from the drop) at opts.off beats. They alternate between two spots side by side,
+      // right then left on a phone held upright (the field's y runs across its screen), one for each thumb:
+      // two pulse trains a beat-gap apart, each from its own drop, opts.spread field units apart, either side of
+      // [x, y] (or, with opts.keep, the first spot stays at [x, y] and the second goes beside it).
+      let altId = 0;
       function pulse(beat, [x, y], hue, o = {}) {
-        const n = o.n ?? 3, gap = o.gap ?? 0.5, off = o.off ?? 1, a = (o.a ?? -90) * DEG;
-        const d = newDrop(beat, x, y, hue, { ...o, rings: n, gap });
-        const id = ++jackId;
-        for (let k = 0; k < n; k++) d.notes.push({ off: off + k * gap, offEnd: off + k * gap, ang: a, spin: 0, ring: k, jack: { id, k, n }, midi: Array.isArray(o.midi) ? o.midi[k % o.midi.length] : o.midi });
-        const [px, py] = ringPoint(d, off, a);
-        if (!inField(px, py)) console.warn(`${def.id}: pulse at beat ${beat} strikes outside the field`);
-        return d;
+        const n = o.n ?? 3, gap = o.gap ?? 0.5, off = o.off ?? 1, a = (o.a ?? -90) * DEG, w = (o.spread ?? 0.24) / 2;
+        const alt = ++altId, drops = [];
+        // the pair keeps inside the field: near an edge both spots move in together
+        const py0 = y + Math.sin(a) * (o.r0 ?? 0) + Math.sin(a) * (o.speed ?? def.speed ?? 0.11) * off;
+        let sides = [-w, w];
+        if (o.keep) sides = py0 + 3 * w <= BOUND_Y ? [0, 2 * w] : [0, -2 * w];
+        const lo = py0 + Math.min(...sides), hi = py0 + Math.max(...sides);
+        const shift = Math.min(0, BOUND_Y - hi) + Math.max(0, -BOUND_Y - lo);
+        sides.map((v) => v + shift).forEach((dy, side) => {
+          const cnt = Math.ceil((n - side) / 2);
+          if (cnt <= 0) return;
+          const d = newDrop(beat + side * gap, x, y + dy, hue, { ...o, rings: cnt, gap: gap * 2 });
+          const id = ++jackId;
+          for (let k = 0; k < cnt; k++) {
+            const q = side + k * 2, mid = Array.isArray(o.midi) ? o.midi[q % o.midi.length] : o.midi;
+            d.notes.push({ off: off + k * gap * 2, offEnd: off + k * gap * 2, ang: a, spin: 0, ring: k, jack: { id, k, n: cnt, alt }, midi: mid });
+          }
+          const [px, py] = ringPoint(d, off, a);
+          if (!inField(px, py)) console.warn(`${def.id}: pulse at beat ${beat} strikes outside the field`);
+          drops.push(d);
+        });
+        // the drop that strikes last (to carry on from), knowing the other
+        const last = drops[(n - 1) % 2] || drops[0];
+        last.mate = drops.find((d) => d !== last);
+        return last;
       }
       // cross(beat, dropA, dropB): two notes at the two points where the rings cross at `beat`,
       // struck together (a crossing pair). Returns both points.
@@ -294,11 +319,13 @@
         for (const x of mates(a)) for (const y of mates(b)) { const pa = fieldPos(x, x.t + x.dur), pb = fieldPos(y, y.t); dist = Math.min(dist, Math.hypot(pb[0] - pa[0], pb[1] - pa[1])); }
         // (16ths at the fastest tempos come 60 ms apart: fine for a jack on one spot, a trill between two
         // close spots, or a run whose notes stay close)
+        // the two spots of rapid hits take a thumb each, so going from one to the other is no reach
+        if (a.jack && b.jack && a.jack.alt === b.jack.alt) continue;
         if (gap < 0.055 || (gap < 0.1 && !(a.jack && b.jack && a.jack.id === b.jack.id) && dist > 0.2) || dist / Math.max(gap, 0.01) > 2.2) console.warn(`${def.id}: beat ${b.beat}: ${gap.toFixed(2)} s after the last note but ${dist.toFixed(2)} away`);
       }
       for (let i = 0; i < CHART.length; i++) {
         for (let j = i + 1; j < CHART.length && CHART[j].t - CHART[i].t < 1.2; j++) {
-          if (CHART[i].jack && CHART[j].jack && CHART[i].jack.id === CHART[j].jack.id) continue;
+          if (CHART[i].jack && CHART[j].jack && CHART[i].jack.alt === CHART[j].jack.alt) continue;
           // notes coming to a standing ring arrive one after another along their lane, so they never sit together
           if (CHART[i].drop.dial && CHART[j].drop.dial && CHART[j].t - CHART[i].t > 0.1) continue;
           if (CHART[j].drop.dial && CHART[j].t - (CHART[i].t + CHART[i].dur) > 0.3) continue;
