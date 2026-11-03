@@ -26,6 +26,7 @@
     ],
     kickOn: (bar, name) => name !== 'INTRO' && name !== 'BREAK',
     chart({ drop, skip, pulse, cross, B }) {
+      KOI_SWIM.length = 0; // (the chart is laid out again when the phone turns)
       // INTRO
       drop(B(0), [0, 0], 2, '..o.o.o.o.', { a: -90, turn: 80 });
       drop(B(1, 2), [-0.35, 0.05], 0, '..o.o.o.', { a: 0, turn: -60 });

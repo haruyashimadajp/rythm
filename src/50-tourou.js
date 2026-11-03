@@ -28,6 +28,7 @@
     ],
     kickOn: (bar, name) => name !== 'BREAK',
     chart({ drop, skip, pulse, cross, B }) {
+      TOUROU_LANTERN.length = 0; TOUROU_BURST.length = 0; // (the chart is laid out again when the phone turns)
       // INTRO: the taiko's "don, don, do-ko": two strikes, then the "do-ko" twice on one spot
       [[[-0.3, 0], 0], [[0.3, 0], 180], [[0, -0.2], 90]].forEach(([p, a], k) => {
         drop(B(k), p, k ? 0 : 3, '..o.o.', { a, turn: 60 });

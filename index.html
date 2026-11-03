@@ -138,24 +138,12 @@
   @media (prefers-reduced-motion: reduce) {
     .panel { backdrop-filter: none; -webkit-backdrop-filter: none; }
   }
-  /* landscape only: held upright, the game asks to be turned */
-  .rotate {
-    position: fixed; inset: 0; z-index: 20; display: none; place-items: center; align-content: center; gap: 22px;
-    background: var(--ink); color: var(--paper); text-align: center; padding: 24px; box-sizing: border-box;
-  }
-  .rotate p { margin: 0; font-size: 1rem; line-height: 1.7; letter-spacing: 0.06em; }
-  .rotate b { font-family: var(--font-display); font-weight: 400; font-size: 1.5rem; letter-spacing: 0.08em; display: block; margin-bottom: 4px; }
-  .rotate .phone { width: 46px; height: 80px; border: 3px solid var(--paper); border-radius: 10px; margin: 0 auto; animation: turn 2.4s ease-in-out infinite; }
-  @keyframes turn { 0%, 25% { transform: rotate(0deg); } 55%, 100% { transform: rotate(-90deg); } }
-  @media (orientation: portrait) { .rotate { display: grid; } }
-  @media (prefers-reduced-motion: reduce) { .rotate .phone { animation: none; transform: rotate(-90deg); } }
   .safe-probe { position: fixed; visibility: hidden; pointer-events: none; padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); }
 </style>
 </head>
 <body>
 <canvas id="stage" aria-label="水面"></canvas>
 <div class="safe-probe" id="safeProbe"></div>
-<div class="rotate" id="rotate" role="alert"><div class="phone" aria-hidden="true"></div><p><b>MINAMO</b>スマホを横向きにしてください</p></div>
 
 <div class="panel-wrap" id="menuWrap">
   <section class="panel" aria-labelledby="gameTitle">
@@ -335,8 +323,8 @@
     decor: () => settings.bg !== false, // background scenery on (settings)
     fx: () => settings.fx !== false && !reduceMotion, // screen shake and flashes on
     order: () => settings.order !== false, // order numbers on the notes
-    // outside of play the panel sits on the left, so songs shift their field right
-    wide: () => S.screen !== 'play',
+    // outside of play, on a wide or sideways screen the panel sits on the left, so songs shift their field right
+    wide: () => S.screen !== 'play' && (W >= 900 || W > H),
     view: (base) => base / settings.speed,
     runOf: (c) => byChart.get(c),
     holding: (n) => n.holding !== null,
@@ -409,6 +397,14 @@
     fingers.clear();
     if (M.onNewRun) M.onNewRun();
   }
+
+  // the song laid its chart out again (the phone turned): the run's notes take their new places, keeping
+  // what has been played (the chart is the same notes in the same order, only placed differently)
+  kit.rechart = () => {
+    if (!S.notes || S.notes.length !== M.chart.length) return;
+    byChart.clear();
+    S.notes.forEach((n, i) => { const c = M.chart[i]; Object.assign(n, c); n.src = c; byChart.set(c, n); });
+  };
 
   function judge(n, grade, now) {
     S.counts[grade]++;
@@ -735,7 +731,7 @@
   const currentScore = () => Math.round((1e6 * S.weight) / M.totalJudges);
   function drawHud(now) {
     const beat = M.beatOf(now);
-    const top = Math.max(12, H * 0.02);
+    const top = Math.max(12, H * 0.02) + kit.safe.t;
     const paper = hex(M.theme.paper), muted = hex(M.theme.muted);
     g.textBaseline = 'top';
     g.textAlign = 'left'; g.fillStyle = rgba(paper, 0.95);
@@ -1075,13 +1071,16 @@
     requestAnimationFrame(frame);
   }
 
+  let wasUpright = null;
   function resize() {
     DPR = Math.min(2, window.devicePixelRatio || 1);
     W = window.innerWidth; H = window.innerHeight;
     const cs = getComputedStyle($('#safeProbe'));
     Object.assign(kit.safe, { t: parseFloat(cs.paddingTop) || 0, r: parseFloat(cs.paddingRight) || 0, b: parseFloat(cs.paddingBottom) || 0, l: parseFloat(cs.paddingLeft) || 0 });
-    // held upright mid-song: the rotate screen covers the field, so the song waits
-    if (H > W) pauseGame();
+    // turned mid-song: the notes jump to their places for the new way up, so the song waits
+    const upright = H > W;
+    if (wasUpright !== null && upright !== wasUpright) pauseGame();
+    wasUpright = upright;
     cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
     g.setTransform(DPR, 0, 0, DPR, 0, 0);
     if (M) M.layout(W, H, true);
@@ -1174,6 +1173,11 @@
       const onScreen = (x, y) => Math.abs(x) < 0.95 && Math.abs(y) < 0.62;
       const DROPS = [];
       let jackId = 0;
+      // the chart is laid out for the screen it is played on: on an upright phone the field turns a quarter
+      // (field angle a appears at screen angle a + 90), so what must read left-and-right on screen (rapid
+      // hits; and in songs that ask for it, anything else) is placed for the way the phone is held.
+      // PORT is the way the chart was last built; a song whose chart never asks is built only once.
+      let PORT = false, orientDep = false;
       function newDrop(beat, x, y, hue, o) {
         const d = {
           beat, x, y, hue, notes: [],
@@ -1250,6 +1254,7 @@
       function pulse(beat, [x, y], hue, o = {}) {
         const n = o.n ?? 3, gap = o.gap ?? 0.5, off = o.off ?? 1, a = (o.a ?? -90) * DEG, w = (o.spread ?? 0.24) / 2;
         const alt = ++altId, drops = [];
+        orientDep = true;
         if (o.widen) {
           // a hit lands each gap; the ring grows so that each side's next hit is 0.1 further out.
           // widen: 'in' runs the other way: a ring closing in from wide to narrow
@@ -1257,8 +1262,8 @@
           const span = speed * gap * (n - 1), lead = closing ? 1 : r0 / speed, land = beat + off - lead;
           const d = newDrop(land, x, y, hue, closing ? { ...o, speed: -speed, r0: r0 + span + speed * lead } : { ...o, speed, r0: 0 });
           for (let q = 0; q < n; q++) {
-            // right, then left (opts.first 1: start on the left)
-            const o2 = lead + q * gap, left = (q + (o.first > 0 ? 1 : 0)) % 2 === 1, side = left ? -1 : 1, ang = left ? 180 : 0;
+            // right, then left on screen (opts.first 1: start on the left)
+            const o2 = lead + q * gap, left = (q + (o.first > 0 ? 1 : 0)) % 2 === 1, side = left ? -1 : 1, ang = PORT ? (left ? 90 : -90) : (left ? 180 : 0);
             const mid = Array.isArray(o.midi) ? o.midi[q % o.midi.length] : o.midi;
             d.notes.push({ off: o2, offEnd: o2, ang: ang * DEG, spin: 0, alt, side, midi: mid });
             const [px, py] = ringPoint(d, o2, ang * DEG);
@@ -1267,15 +1272,17 @@
           return d;
         }
         // the pair keeps inside the field: near an edge both spots move in together
-        const px0 = x + Math.cos(a) * (o.r0 ?? 0) + Math.cos(a) * (o.speed ?? def.speed ?? 0.11) * off;
+        // (side by side on screen: along field x, or on an upright phone along field y)
+        const ax = PORT ? 1 : 0, BND = PORT ? BOUND_Y : BOUND_X;
+        const p0 = (PORT ? y : x) + (PORT ? Math.sin(a) : Math.cos(a)) * ((o.r0 ?? 0) + (o.speed ?? def.speed ?? 0.11) * off);
         let sides = [-w, w];
-        if (o.keep) sides = px0 + 3 * w <= BOUND_X ? [0, 2 * w] : [0, -2 * w];
-        const lo = px0 + Math.min(...sides), hi = px0 + Math.max(...sides);
-        const shift = Math.min(0, BOUND_X - hi) + Math.max(0, -BOUND_X - lo);
-        sides.map((v) => v + shift).forEach((dx, side) => {
+        if (o.keep) sides = p0 + 3 * w <= BND ? [0, 2 * w] : [0, -2 * w];
+        const lo = p0 + Math.min(...sides), hi = p0 + Math.max(...sides);
+        const shift = Math.min(0, BND - hi) + Math.max(0, -BND - lo);
+        sides.map((v) => v + shift).forEach((dv, side) => {
           const cnt = Math.ceil((n - side) / 2);
           if (cnt <= 0) return;
-          const d = newDrop(beat + side * gap, x + dx, y, hue, { ...o, rings: cnt, gap: gap * 2 });
+          const d = newDrop(beat + side * gap, x + (ax ? 0 : dv), y + (ax ? dv : 0), hue, { ...o, rings: cnt, gap: gap * 2 });
           const id = ++jackId;
           for (let k = 0; k < cnt; k++) {
             const q = side + k * 2, mid = Array.isArray(o.midi) ? o.midi[q % o.midi.length] : o.midi;
@@ -1363,9 +1370,18 @@
       const B = (bar, beat = 0) => bar * BPB + beat;
       // where note i of drop d sits, and when: for chaining a new drop onto a note
       const tip = (d, i) => { const n = d.notes[i < 0 ? d.notes.length + i : i]; return { beat: d.beat + n.offEnd, p: ringPoint(d, n.offEnd, n.ang + n.spin, n.ring || 0) }; };
-      def.chart({ drop, skip, wave, pulse, cross, tip, B, chord, tap, dial, timeOf });
-
+      // where a note sits (field units), or for a hold, where the ripple front is along it at time t
+      function fieldPos(n, t) {
+        if (!(n.dur > 0)) return ringPoint(n.drop, n.beat - n.drop.beat, n.ang, n.ring);
+        const b = Math.min(n.beat + n.len, Math.max(n.beat, beatOf(Math.min(n.t + n.dur, Math.max(n.t, t))))), u = (b - n.beat) / n.len;
+        return ringPoint(n.drop, b - n.drop.beat, n.ang + n.spin * u, n.ring);
+      }
       const CHART = [];
+      function build(port) {
+      PORT = port; DROPS.length = 0; CHART.length = 0; jackId = 0; altId = 0; pairId = 0;
+      const api = { drop, skip, wave, pulse, cross, tip, B, chord, tap, dial, timeOf, get portrait() { orientDep = true; return PORT; } };
+      def.chart(api);
+
       for (const d of DROPS) {
         d.t = timeOf(d.beat);
         if (d.stone) d.stone.t = timeOf(d.stone.beat);
@@ -1390,12 +1406,6 @@
         }
       }
 
-      // where a note sits (field units), or for a hold, where the ripple front is along it at time t
-      function fieldPos(n, t) {
-        if (!(n.dur > 0)) return ringPoint(n.drop, n.beat - n.drop.beat, n.ang, n.ring);
-        const b = Math.min(n.beat + n.len, Math.max(n.beat, beatOf(Math.min(n.t + n.dur, Math.max(n.t, t))))), u = (b - n.beat) / n.len;
-        return ringPoint(n.drop, b - n.drop.beat, n.ang + n.spin * u, n.ring);
-      }
       // dark notes show themselves when the last reveal ring before them sweeps past (at least a beat ahead)
       const REVEALERS = DROPS.filter((d) => d.reveal);
       for (const c of CHART) {
@@ -1433,7 +1443,7 @@
         // the two spots of rapid hits take a thumb each, so going from one to the other is no reach
         if (a.jack && b.jack && a.jack.alt === b.jack.alt) continue;
         if (a.alt && a.alt === b.alt) continue;
-        if (gap < 0.055 || (gap < 0.1 && !(a.jack && b.jack && a.jack.id === b.jack.id) && dist > 0.2) || dist / Math.max(gap, 0.01) > 2.2) console.warn(`${def.id}: beat ${b.beat}: ${gap.toFixed(2)} s after the last note but ${dist.toFixed(2)} away`);
+        if (gap < 0.055 || (gap < 0.1 && !(a.jack && b.jack && a.jack.id === b.jack.id) && dist > 0.2) || dist / Math.max(gap, 0.01) > 2.2) console.warn(`${def.id}: beat ${b.beat}: ${gap.toFixed(2)} s after the last note but ${dist.toFixed(2)} away${PORT ? ' (upright)' : ''}`);
       }
       for (let i = 0; i < CHART.length; i++) {
         for (let j = i + 1; j < CHART.length && CHART[j].t - CHART[i].t < 1.2; j++) {
@@ -1444,16 +1454,18 @@
           // nor do two notes that are never on the water at once
           if (CHART[j].drop.showBeat !== undefined && CHART[i].t + CHART[i].dur < timeOf(CHART[j].drop.showBeat)) continue;
           const a = fieldPos(CHART[i], CHART[i].t), b = fieldPos(CHART[j], CHART[j].t);
-          if (Math.hypot(a[0] - b[0], a[1] - b[1]) < 0.07) console.warn(`${def.id}: beats ${CHART[i].beat} and ${CHART[j].beat} share a spot`);
+          if (Math.hypot(a[0] - b[0], a[1] - b[1]) < 0.07) console.warn(`${def.id}: beats ${CHART[i].beat} and ${CHART[j].beat} share a spot${PORT ? ' (upright)' : ''}`);
         }
       }
+      }
+      build(false);
       const CHORDS = def.chords;
 
       // ----- layout -----
       let W = 0, H = 0, VIEW = 1.8;
-      const F = { cx: 0, cy: 0, u: 1 }, FG = { cx: 0, cy: 0, u: 1 };
+      const F = { cx: 0, cy: 0, u: 1, portrait: false }, FG = { cx: 0, cy: 0, u: 1 };
       // field units -> screen; on tall screens the field turns a quarter
-      const toScreen = (x, y) => [F.cx + x * F.u, F.cy + y * F.u];
+      const toScreen = (x, y) => (F.portrait ? [F.cx - y * F.u, F.cy + x * F.u] : [F.cx + x * F.u, F.cy + y * F.u]);
       const noteR = () => Math.max(15, F.u * 0.045);
       // how far from a note a press still counts (generous: a little over twice the note's size)
       const hitR = () => Math.max(40, noteR() * 2.7);
@@ -1898,7 +1910,7 @@
           g.globalAlpha = Math.min(1, Math.sin(Math.PI * u) * 1.6) * 0.85;
           g.fillStyle = rgba(up ? ACCENT : HUES[0], 1);
           g.font = `${Math.round(Math.min(30, W * 0.06))}px "Dela Gothic One", sans-serif`;
-          g.fillText(`${up ? '▲' : '▼'} BPM ${typeof call === 'string' ? call : bpm}`, F.cx, F.cy + 0.48 * F.u * 0.86);
+          g.fillText(`${up ? '▲' : '▼'} BPM ${typeof call === 'string' ? call : bpm}`, F.cx, F.cy + (F.portrait ? 0.8 : 0.48) * F.u * 0.86);
           g.globalAlpha = 1;
         }
       }
@@ -1923,7 +1935,7 @@
         }
         const sec = secAt(beat), into = beat - sec.bar * BPB;
         if (sec.bar === 0 || into < 0 || into > BPB * 1.5) return;
-        const u = into / (BPB * 1.5), halfH = 0.48 * F.u;
+        const u = into / (BPB * 1.5), halfH = (F.portrait ? 0.8 : 0.48) * F.u;
         g.globalAlpha = Math.sin(Math.PI * u) * 0.24;
         g.fillStyle = rgba(HUES[sec.hue], 1);
         g.font = `${Math.round(Math.min(36, W * 0.07))}px "Dela Gothic One", sans-serif`;
@@ -1948,14 +1960,17 @@
         onAudioStop() { if (def.song.stop) def.song.stop(); },
         layout(w, h, snap) {
           W = w; H = h;
-          // landscape only: a phone held sideways is short, so the HUD gets a slim band and the field the rest
+          // a phone held sideways is short, so the HUD gets a slim band and the field the rest
           const sf = kit.safe, short = H < 520;
           const top = Math.max(sf.t, 0) + (short ? 40 : Math.max(70, H * 0.09)), bottom = Math.max(sf.b, short ? 12 : Math.max(30, H * 0.04));
           let x0 = 24 + sf.l;
           const x1 = W - 24 - sf.r;
           if (kit.wide()) x0 = W >= 900 ? Math.max(W * 0.42, 560) : Math.min(W * 0.55, 470 + sf.l);
           const aw = x1 - x0, ah = H - top - bottom;
-          FG.u = Math.min(aw / 2 / 0.8, ah / 2 / 0.48);
+          F.portrait = H > W;
+          FG.u = F.portrait ? Math.min(aw / 2 / 0.48, ah / 2 / 0.8) : Math.min(aw / 2 / 0.8, ah / 2 / 0.48);
+          // turned the other way: lay the chart out again, and the run carries on with it
+          if (orientDep && F.portrait !== PORT) { build(F.portrait); if (kit.rechart) kit.rechart(); }
           FG.cx = x0 + aw / 2; FG.cy = top + ah / 2;
           if (snap) Object.assign(F, FG);
           if (scene.layout) scene.layout();
@@ -2261,6 +2276,7 @@
     ],
     kickOn: (bar, name) => name !== 'INTRO' && name !== 'BREAK',
     chart({ drop, skip, pulse, cross, B }) {
+      KOI_SWIM.length = 0; // (the chart is laid out again when the phone turns)
       // INTRO
       drop(B(0), [0, 0], 2, '..o.o.o.o.', { a: -90, turn: 80 });
       drop(B(1, 2), [-0.35, 0.05], 0, '..o.o.o.', { a: 0, turn: -60 });
@@ -2791,6 +2807,7 @@
     ],
     kickOn: (bar, name) => name !== 'BREAK',
     chart({ drop, skip, pulse, cross, B }) {
+      TOUROU_LANTERN.length = 0; TOUROU_BURST.length = 0; // (the chart is laid out again when the phone turns)
       // INTRO: the taiko's "don, don, do-ko": two strikes, then the "do-ko" twice on one spot
       [[[-0.3, 0], 0], [[0.3, 0], 180], [[0, -0.2], 90]].forEach(([p, a], k) => {
         drop(B(k), p, k ? 0 : 3, '..o.o.', { a, turn: 60 });
@@ -3541,7 +3558,7 @@
             }
           }
           // the beam: white light from the left edge into the prism, a rainbow fanning out of it
-          const [px, py] = f.toScreen(-0.05, 0), ang = Math.sin(c.now * 0.2) * 0.25;
+          const [px, py] = f.toScreen(-0.05, 0), ang = (F.portrait ? Math.PI / 2 : 0) + Math.sin(c.now * 0.2) * 0.25;
           if (I > 0.02) {
             const sx = px - Math.cos(ang) * W, sy = py - Math.sin(ang) * W;
             g.globalCompositeOperation = 'lighter';
@@ -3648,6 +3665,7 @@
     ],
     chords: [{}],
     chart({ drop, skip, wave, pulse, tip }) {
+      ABYSS_JELLY.length = 0; // (the chart is laid out again when the phone turns)
       const CY = 0, VI = 1, AQ = 2, GO = 3;
       const pat = (land, notes) => {
         const a = [];
@@ -3899,7 +3917,8 @@
       { bar: 52, name: 'DROP 2', hue: 1 }, { bar: 68, name: 'FORMAT', hue: 3 }, { bar: 72, name: 'SHUTDOWN', hue: 2 },
     ],
     chords: [{}],
-    chart({ drop, skip, pulse, tip }) {
+    chart({ drop, skip, pulse, tip, portrait }) {
+      MALWARE_INFECT.length = 0;
       const GR = 0, RD = 1, CY = 2, YE = 3;
       const pat = (land, notes) => {
         const a = [];
@@ -3913,7 +3932,8 @@
       };
       const toward = ([x, y], tilt = 0) => Math.atan2(-y, -x) / DEG + tilt;
       const clampP = ([x, y]) => [Math.max(-0.5, Math.min(0.5, x)), Math.max(-0.28, Math.min(0.28, y))];
-      const rnd = mulberry32(10); // (a seed whose layout passes the chart checks)
+      // (seeds whose layouts pass the chart checks: one for a phone held sideways, one for upright)
+      const rnd = mulberry32(portrait ? 404 : 10);
       const inRange = (list, a, b) => list.filter(([x]) => x >= a && x < b);
       // notes of a melody in [a, b): 8ths stay taps, notes of two beats or more become holds
       const notesOf = (list, a, b, skipSet = []) => inRange(list, a, b).filter(([x]) => !skipSet.some(([s, e]) => x >= s && x < e)).map(([x, l]) => (l >= 2 ? [x, 1.5] : x));
@@ -3958,7 +3978,9 @@
       const EXCL = [...STUT.map((b) => [b - 0.01, b + 0.6]), [270.99, 272]];
       const stutter = (b, hue = RD) => {
         // its second spot sits beside the first, to the right unless that is off the field
-        const target = step(cur.p, 0.16, (q) => [q[0] + (q[0] + 0.36 <= 0.74 ? 0.24 : -0.24), q[1]]), a = outward(target) + 180;
+        // (the upright layout, with its own seed, passes without this)
+        const beside = portrait ? undefined : (q) => [q[0] + (q[0] + 0.36 <= 0.74 ? 0.24 : -0.24), q[1]];
+        const target = step(cur.p, 0.16, beside), a = outward(target) + 180;
         track(pulse(b - 1, centreFor(target, 0.11, a), hue, { a, off: 1, n: 3, gap: 0.25, keep: true }));
       };
       // INFECTION: the virus spreads: every ring starts where the last note was struck
@@ -3986,7 +4008,7 @@
       const tele = (hue, notes, span = 0.3) => {
         const first = [].concat(notes[0])[0], land = first - 1;
         // (its first note comes at the top of the ring, so that spot must be clear as well as the centre)
-        let c = step(cur.p, 0.12, (q) => [q[0], q[1] - 0.15]);
+        let c = step(cur.p, 0.12, portrait ? undefined : (q) => [q[0], q[1] - 0.15]);
         const c0 = c, path = [];
         notes.forEach((n, i) => {
           const b = [].concat(n)[0];
@@ -4289,8 +4311,10 @@
   ];
   // the dial: each pitch has its own hour (D at twelve)
   const tkHour = (midi) => ((midi - 62) % 12 + 12) % 12;
-  // (twelve o'clock is straight up: field angle -90)
-  const tkHourAng = (h) => -90 + 30 * h;
+  // (twelve o'clock is straight up: field angle -90; on an upright phone the field is turned a quarter, so
+  // there field angle a appears at screen angle a + 90 and twelve o'clock is field angle -180)
+  let TK_UP = false; // the chart is being laid out for an upright phone
+  const tkHourAng = (h) => (TK_UP ? -180 : -90) + 30 * h;
   const TK_BELLS = new Set(); // beats of the midnight bells (the scene lights a numeral for each)
   const TK_GHOST = []; // melody notes the chart leaves to the music: [beat, midi, voice]
   // OVERCLOCK's tune, bar by bar: the right hand's four notes (the left hand's A comes between them)
@@ -4313,7 +4337,12 @@
     ],
     chords: TK_BARS.slice(0, 4).map((c) => ({ ...c, lead: [74] })),
     kickOn: (bar, name) => !((name === 'WIND-UP' && bar < 4) || name === 'STILL WATER' || name === 'MIDNIGHT'),
-    chart({ drop, skip, pulse, cross, B, chord, tap, dial }) {
+    // the chart has two layouts: one for a phone held sideways, one for a phone held upright (P). They are
+    // the same notes; the upright one turns what must read on screen (the clock, higher notes to the right
+    // or up, rapid hits left and right) and moves the fills to suit
+    chart({ drop, skip, pulse, cross, B, chord, tap, dial, portrait }) {
+      const P = portrait;
+      TK_UP = P; TK_GHOST.length = 0;
       // ----- layouts -----
       // fan: a bar of melody spread from its drop like a polar score. Further out is later; further clockwise
       // is higher (the fan spans `span` degrees clockwise from angle `from`, the lowest note).
@@ -4332,8 +4361,9 @@
       const FAR = 3;
       function sweep(beat, dir, hue, notes, o = {}) {
         const v = o.v ?? 0.2, lead = o.lead ?? 0.5, vert = dir === 'up' || dir === 'down', edge = vert ? 0.44 : 0.78, sx = o.sx ?? (vert ? 0.05 : 0.034);
-        // the line coming down sits a little to the right of the one going up, so where they turn their notes stay apart
-        const xo = o.x ?? (dir === 'down' ? 0.1 : dir === 'up' ? -0.1 : 0);
+        // the line coming down sits a little to the right of the one going up (upright: to the left; field x is
+        // then up and down on screen), so where they turn their notes stay apart
+        const xo = o.x ?? (dir === 'down' ? 0.1 : dir === 'up' ? -0.1 : 0) * (P ? -1 : 1);
         const C = { up: [xo, edge + FAR], down: [xo, -edge - FAR], right: [-edge - FAR, o.y ?? 0], left: [edge + FAR, o.y ?? 0] }[dir];
         const d = drop(beat - lead, C, hue, '', { speed: v, r0: FAR, show: 0.75 });
         const at = (b, across) => {
@@ -4344,8 +4374,9 @@
         for (const [q, m, h, nsx] of notes) {
           const b = beat + q * 0.5;
           if (Array.isArray(m)) { chord(b, d, m.map((x) => at(b, x - (vert ? xo : 0))), { midi: o.chordMidi || [62, 65, 69, 74].slice(0, m.length) }); continue; }
-          // across the line: higher is further right (on a sideways sweep, further up)
-          tap(d, b, at(b, (m - (o.mid ?? 77)) * (nsx || sx)), { midi: m, len: h ? h * 0.5 : 0 });
+          // across the line: higher is further right (on a sideways sweep, further up); upright, higher is
+          // further toward field -x, which the phone shows as further up
+          tap(d, b, at(b, (P ? -1 : 1) * (m - (o.mid ?? 77)) * (nsx || sx)), { midi: m, len: h ? h * 0.5 : 0 });
         }
         return d;
       }
@@ -4375,24 +4406,27 @@
         at.forEach((b, h) => tap(d, B(8) + b, tkHourAng(h), { midi: 74 + h }));
       }
 
-      // ===== RUNAWAY (210): four blocks of four bars; the line runs down, up, down, then a fill =====
+      // ===== RUNAWAY (210): four blocks of four bars; the line runs down, up, down, then a fill (upright: across
+      // the screen, from the other side) =====
       const block = (bar, k, theme) => {
         // bar 1: the stab on the kick is a row of three, then the melody; the line goes one way, back, and again
-        // (here the line coming down sits to the left: RUNAWAY is LIMIT's layout turned upside down)
-        sweep(B(bar), 'down', k % 4, [[0, ROW3], ...theme[0].slice(1)], { chordMidi: [62, 65, 69], x: -0.1 });
-        sweep(B(bar + 1), 'up', (k + 1) % 4, theme[1], { x: 0.1 });
-        sweep(B(bar + 2), 'down', (k + 2) % 4, free(theme[2], B(bar + 2)), { x: -0.1 });
+        // (sideways, the line coming down sits to the left: RUNAWAY is LIMIT's layout turned upside down)
+        const [d1, d2] = P ? ['up', 'down'] : ['down', 'up'], xs = P ? {} : { x: -0.1 }, xs2 = P ? {} : { x: 0.1 };
+        sweep(B(bar), d1, k % 4, [[0, ROW3], ...theme[0].slice(1)], { chordMidi: [62, 65, 69], ...xs });
+        sweep(B(bar + 1), d2, (k + 1) % 4, theme[1], xs2);
+        sweep(B(bar + 2), d1, (k + 2) % 4, free(theme[2], B(bar + 2)), xs);
         const b4 = B(bar + 3), h = (k + 3) % 4;
-        if (k === 0) sweep(b4, 'up', h, theme[3].map(([q, m, hh]) => (hh ? [q, m, 1] : [q, m])), { x: 0.1 });
+        if (k === 0) sweep(b4, d2, h, theme[3].map(([q, m, hh]) => (hh ? [q, m, 1] : [q, m])), xs2);
         else if (k === 1) {
           // a hoover trill: two spots in turn, 16ths, then the chord they were trilling
-          pulse(b4 - 1, [0, -0.3], h, { n: 8, gap: 0.25, off: 1, widen: true, midi: [76, 73] });
-          const d = drop(b4 + 1.5, [-0.25, -0.05], h, '', { speed: 0.13 });
+          pulse(b4 - 1, P ? [0.35, 0] : [0, -0.3], h, { n: 8, gap: 0.25, off: 1, widen: true, midi: [76, 73] });
+          const d = drop(b4 + 1.5, P ? [0.1, 0] : [-0.25, -0.05], h, '', { speed: 0.13 });
           chord(b4 + 2.5, d, tri(0), { midi: [69, 73, 76] });
         } else if (k === 2) {
           // a snare roll: six 16ths on one spot, then two rings crossing
-          pulse(b4 - 1, [0.33, 0.1], h, { n: 6, gap: 0.25, off: 1, widen: true, first: 1, midi: 0 });
-          const A = drop(b4 + 0.5, [-0.28, 0.15], (h + 1) % 4, '', { speed: 0.12 }), C = drop(b4 + 0.5, [0.28, 0.15], (h + 2) % 4, '', { speed: 0.12 });
+          pulse(b4 - 1, P ? [0.5, 0] : [0.33, 0.1], h, { n: 6, gap: 0.25, off: 1, widen: true, first: P ? 0 : 1, midi: 0 });
+          const cy = P ? -0.15 : 0.15;
+          const A = drop(b4 + 0.5, [-0.28, cy], (h + 1) % 4, '', { speed: 0.12 }), C = drop(b4 + 0.5, [0.28, cy], (h + 2) % 4, '', { speed: 0.12 });
           cross(b4 + 3, A, C);
         } else {
           // a diminished stab (a square), then a 16th run round the same ring, and a breath before time stops
@@ -4449,7 +4483,7 @@
       drop(B(39) - 0.5, [0.05, 0.04], 1, '.o.H---', { speed: -0.1, r0: 0.38, a: -20, turn: -50, midi: [73, 74] });
 
       // ===== RESTART (105 -> 240): one spot struck every beat while the clock revs =====
-      pulse(B(40) - 1, [-0.05, 0], 0, { n: 8, gap: 1, off: 1, widen: true, midi: [50, 50, 53, 53, 57, 57, 61, 62] });
+      pulse(B(40) - 1, P ? [-0.35, -0.01] : [-0.05, 0], 0, { n: 8, gap: 1, off: 1, widen: true, midi: [50, 50, 53, 53, 57, 57, 61, 62] });
 
       // ===== LIMIT (240): three blocks; the line runs up, across, up, then a fill =====
       const limit = (bar, j, theme) => {
@@ -4460,20 +4494,20 @@
         const b4 = B(bar + 3), h = (j + 1) % 4;
         if (j === 0) {
           // an 8th trill between two spots, then a triangle
-          pulse(b4 - 1, [0.3, -0.3], h, { n: 6, gap: 0.5, off: 1, widen: true, first: 1, midi: [76, 73] });
-          const d = drop(b4 + 2, [0.45, 0], h, '', { speed: 0.14 });
+          pulse(b4 - 1, P ? [0.3, -0.1] : [0.3, -0.3], h, { n: 6, gap: 0.5, off: 1, widen: true, first: P ? 0 : 1, midi: [76, 73] });
+          const d = drop(b4 + 2, P ? [0.5, 0.15] : [0.45, 0], h, '', { speed: 0.14 });
           chord(b4 + 3, d, tri(180), { midi: [69, 73, 76] });
         } else if (j === 1) {
           // a snare roll, then pairs
-          pulse(b4 - 1, [-0.35, 0.05], h, { n: 6, gap: 0.25, off: 1, widen: true, first: 1, midi: 0 });
+          pulse(b4 - 1, P ? [-0.5, 0.05] : [-0.35, 0.05], h, { n: 6, gap: 0.25, off: 1, widen: true, first: 1, midi: 0 });
           const d = drop(b4 + 1, [-0.25, 0.05], h, '', { speed: 0.15 });
           chord(b4 + 2, d, [-90, 90], { midi: [76, 69] });
-          chord(b4 + 3, d, [-30, 150], { midi: [73, 69] });
+          chord(b4 + 3, d, P ? [-120, 60] : [-30, 150], { midi: [73, 69] });
         } else {
           // stomps: triangle, triangle turned over, then the square
-          const d = drop(b4 - 1, [0.35, -0.08], h, '', { speed: 0.15 });
-          chord(b4, d, tri(0), { midi: [69, 73, 76] });
-          chord(b4 + 1, d, tri(180), { midi: [69, 73, 76] });
+          const d = drop(b4 - 1, P ? [0.3, -0.03] : [0.35, -0.08], h, '', { speed: 0.15 });
+          chord(b4, d, tri(P ? 180 : 0), { midi: [69, 73, 76] });
+          chord(b4 + 1, d, tri(P ? 0 : 180), { midi: [69, 73, 76] });
           chord(b4 + 2, d, sq(0), { midi: [61, 64, 67, 70] });
         }
       };
@@ -4503,32 +4537,32 @@
         const b = B(56 + k);
         if (k === 7) {
           // the last climb: A major, then turned over, then the square, a step faster each time
-          const d = drop(b - 1.5, [0.4, -0.08], 0, '', { speed: 0.1 });
+          const d = drop(b - 1.5, P ? [-0.25, -0.1] : [0.4, -0.08], 0, '', { speed: 0.1 });
           chord(b, d, tri(60), { midi: [69, 73, 76] });
           chord(b + 1, d, tri(240), { midi: [69, 73, 76] });
-          chord(b + 2, d, sq(10), { midi: [61, 64, 67, 70] });
+          chord(b + 2, d, sq(P ? -10 : 10), { midi: [61, 64, 67, 70] });
           return;
         }
         const burst = k % 2 === 0, four = burst && k > 0;   // (a bar after a run starts with three, clear of where it ended)
         let notes = bar.slice(1).map(([q, m, h]) => (h ? [q, m, 2] : [q, m]));
         if (burst) notes = [...notes.filter(([q]) => q < 4), ...turn16(bar.find(([q]) => q === 4)[1])];
-        sweep(b, k % 2 ? 'down' : 'up', k % 4, [[0, four ? ROW4 : ROW3], ...notes], { chordMidi: four ? [62, 65, 68, 71] : [62, 65, 69], sx: 0.042, x: k % 2 ? 0.1 : -0.1 });
+        sweep(b, k % 2 ? 'down' : 'up', k % 4, [[0, four ? ROW4 : ROW3], ...notes], { chordMidi: four ? [62, 65, 68, 71] : [62, 65, 69], sx: 0.042, x: (k % 2 ? 0.1 : -0.1) * (P ? -1 : 1) });
       });
 
       // ===== OVERCLOCK (320): a new tune, all rapid hits. Right and left in turn: the right hand plays the
       // tune, the left hammers the A underneath (a pedal point). Each bar is one run of eight on a ring that
       // spreads out, then one that closes in again, so every bar flows into the next; and the runs climb
-      // the screen, a step higher each bar, as the tune climbs =====
+      // the screen, a step higher each bar, as the tune climbs (upright, field -x is up) =====
       TK_OVER.forEach((tune, k) => {
-        const b = B(64 + k), cy = 0.35 - k * 0.1, hue = (k + 2) % 4;
+        const b = B(64 + k), at = P ? [0.55 - k * 0.16, 0] : [0, 0.35 - k * 0.1], hue = (k + 2) % 4;
         if (k === 7) {
           // the last bar: six more, closing in on the A, and the tape runs down into midnight
-          pulse(b - 1, [0, cy], hue, { n: 6, gap: 0.5, off: 1, widen: 'in', r0w: 0.1, show: 1, midi: [tune[0], 69, tune[1], 69, 81, 69] });
+          pulse(b - 1, at, hue, { n: 6, gap: 0.5, off: 1, widen: 'in', r0w: 0.1, show: 1, midi: [tune[0], 69, tune[1], 69, 81, 69] });
           return;
         }
         const midi = tune.flatMap((m) => [m, 69]);
         // (each run shows itself about two beats before its first hit, so the screen holds one run and the next)
-        pulse(b - 1, [0, cy], hue, { n: 8, gap: 0.5, off: 1, widen: k % 2 ? 'in' : true, r0w: 0.06, show: k % 2 ? 1 : 1.4, midi });
+        pulse(b - 1, at, hue, { n: 8, gap: 0.5, off: 1, widen: k % 2 ? 'in' : true, r0w: 0.06, show: k % 2 ? 1 : 1.4, midi });
       });
 
       // ===== MIDNIGHT (63): twelve bells round the dial, one for every hour, then the last chord at twelve =====

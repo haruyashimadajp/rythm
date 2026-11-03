@@ -86,6 +86,11 @@
       const onScreen = (x, y) => Math.abs(x) < 0.95 && Math.abs(y) < 0.62;
       const DROPS = [];
       let jackId = 0;
+      // the chart is laid out for the screen it is played on: on an upright phone the field turns a quarter
+      // (field angle a appears at screen angle a + 90), so what must read left-and-right on screen (rapid
+      // hits; and in songs that ask for it, anything else) is placed for the way the phone is held.
+      // PORT is the way the chart was last built; a song whose chart never asks is built only once.
+      let PORT = false, orientDep = false;
       function newDrop(beat, x, y, hue, o) {
         const d = {
           beat, x, y, hue, notes: [],
@@ -162,6 +167,7 @@
       function pulse(beat, [x, y], hue, o = {}) {
         const n = o.n ?? 3, gap = o.gap ?? 0.5, off = o.off ?? 1, a = (o.a ?? -90) * DEG, w = (o.spread ?? 0.24) / 2;
         const alt = ++altId, drops = [];
+        orientDep = true;
         if (o.widen) {
           // a hit lands each gap; the ring grows so that each side's next hit is 0.1 further out.
           // widen: 'in' runs the other way: a ring closing in from wide to narrow
@@ -169,8 +175,8 @@
           const span = speed * gap * (n - 1), lead = closing ? 1 : r0 / speed, land = beat + off - lead;
           const d = newDrop(land, x, y, hue, closing ? { ...o, speed: -speed, r0: r0 + span + speed * lead } : { ...o, speed, r0: 0 });
           for (let q = 0; q < n; q++) {
-            // right, then left (opts.first 1: start on the left)
-            const o2 = lead + q * gap, left = (q + (o.first > 0 ? 1 : 0)) % 2 === 1, side = left ? -1 : 1, ang = left ? 180 : 0;
+            // right, then left on screen (opts.first 1: start on the left)
+            const o2 = lead + q * gap, left = (q + (o.first > 0 ? 1 : 0)) % 2 === 1, side = left ? -1 : 1, ang = PORT ? (left ? 90 : -90) : (left ? 180 : 0);
             const mid = Array.isArray(o.midi) ? o.midi[q % o.midi.length] : o.midi;
             d.notes.push({ off: o2, offEnd: o2, ang: ang * DEG, spin: 0, alt, side, midi: mid });
             const [px, py] = ringPoint(d, o2, ang * DEG);
@@ -179,15 +185,17 @@
           return d;
         }
         // the pair keeps inside the field: near an edge both spots move in together
-        const px0 = x + Math.cos(a) * (o.r0 ?? 0) + Math.cos(a) * (o.speed ?? def.speed ?? 0.11) * off;
+        // (side by side on screen: along field x, or on an upright phone along field y)
+        const ax = PORT ? 1 : 0, BND = PORT ? BOUND_Y : BOUND_X;
+        const p0 = (PORT ? y : x) + (PORT ? Math.sin(a) : Math.cos(a)) * ((o.r0 ?? 0) + (o.speed ?? def.speed ?? 0.11) * off);
         let sides = [-w, w];
-        if (o.keep) sides = px0 + 3 * w <= BOUND_X ? [0, 2 * w] : [0, -2 * w];
-        const lo = px0 + Math.min(...sides), hi = px0 + Math.max(...sides);
-        const shift = Math.min(0, BOUND_X - hi) + Math.max(0, -BOUND_X - lo);
-        sides.map((v) => v + shift).forEach((dx, side) => {
+        if (o.keep) sides = p0 + 3 * w <= BND ? [0, 2 * w] : [0, -2 * w];
+        const lo = p0 + Math.min(...sides), hi = p0 + Math.max(...sides);
+        const shift = Math.min(0, BND - hi) + Math.max(0, -BND - lo);
+        sides.map((v) => v + shift).forEach((dv, side) => {
           const cnt = Math.ceil((n - side) / 2);
           if (cnt <= 0) return;
-          const d = newDrop(beat + side * gap, x + dx, y, hue, { ...o, rings: cnt, gap: gap * 2 });
+          const d = newDrop(beat + side * gap, x + (ax ? 0 : dv), y + (ax ? dv : 0), hue, { ...o, rings: cnt, gap: gap * 2 });
           const id = ++jackId;
           for (let k = 0; k < cnt; k++) {
             const q = side + k * 2, mid = Array.isArray(o.midi) ? o.midi[q % o.midi.length] : o.midi;
@@ -275,9 +283,18 @@
       const B = (bar, beat = 0) => bar * BPB + beat;
       // where note i of drop d sits, and when: for chaining a new drop onto a note
       const tip = (d, i) => { const n = d.notes[i < 0 ? d.notes.length + i : i]; return { beat: d.beat + n.offEnd, p: ringPoint(d, n.offEnd, n.ang + n.spin, n.ring || 0) }; };
-      def.chart({ drop, skip, wave, pulse, cross, tip, B, chord, tap, dial, timeOf });
-
+      // where a note sits (field units), or for a hold, where the ripple front is along it at time t
+      function fieldPos(n, t) {
+        if (!(n.dur > 0)) return ringPoint(n.drop, n.beat - n.drop.beat, n.ang, n.ring);
+        const b = Math.min(n.beat + n.len, Math.max(n.beat, beatOf(Math.min(n.t + n.dur, Math.max(n.t, t))))), u = (b - n.beat) / n.len;
+        return ringPoint(n.drop, b - n.drop.beat, n.ang + n.spin * u, n.ring);
+      }
       const CHART = [];
+      function build(port) {
+      PORT = port; DROPS.length = 0; CHART.length = 0; jackId = 0; altId = 0; pairId = 0;
+      const api = { drop, skip, wave, pulse, cross, tip, B, chord, tap, dial, timeOf, get portrait() { orientDep = true; return PORT; } };
+      def.chart(api);
+
       for (const d of DROPS) {
         d.t = timeOf(d.beat);
         if (d.stone) d.stone.t = timeOf(d.stone.beat);
@@ -302,12 +319,6 @@
         }
       }
 
-      // where a note sits (field units), or for a hold, where the ripple front is along it at time t
-      function fieldPos(n, t) {
-        if (!(n.dur > 0)) return ringPoint(n.drop, n.beat - n.drop.beat, n.ang, n.ring);
-        const b = Math.min(n.beat + n.len, Math.max(n.beat, beatOf(Math.min(n.t + n.dur, Math.max(n.t, t))))), u = (b - n.beat) / n.len;
-        return ringPoint(n.drop, b - n.drop.beat, n.ang + n.spin * u, n.ring);
-      }
       // dark notes show themselves when the last reveal ring before them sweeps past (at least a beat ahead)
       const REVEALERS = DROPS.filter((d) => d.reveal);
       for (const c of CHART) {
@@ -345,7 +356,7 @@
         // the two spots of rapid hits take a thumb each, so going from one to the other is no reach
         if (a.jack && b.jack && a.jack.alt === b.jack.alt) continue;
         if (a.alt && a.alt === b.alt) continue;
-        if (gap < 0.055 || (gap < 0.1 && !(a.jack && b.jack && a.jack.id === b.jack.id) && dist > 0.2) || dist / Math.max(gap, 0.01) > 2.2) console.warn(`${def.id}: beat ${b.beat}: ${gap.toFixed(2)} s after the last note but ${dist.toFixed(2)} away`);
+        if (gap < 0.055 || (gap < 0.1 && !(a.jack && b.jack && a.jack.id === b.jack.id) && dist > 0.2) || dist / Math.max(gap, 0.01) > 2.2) console.warn(`${def.id}: beat ${b.beat}: ${gap.toFixed(2)} s after the last note but ${dist.toFixed(2)} away${PORT ? ' (upright)' : ''}`);
       }
       for (let i = 0; i < CHART.length; i++) {
         for (let j = i + 1; j < CHART.length && CHART[j].t - CHART[i].t < 1.2; j++) {
@@ -356,16 +367,18 @@
           // nor do two notes that are never on the water at once
           if (CHART[j].drop.showBeat !== undefined && CHART[i].t + CHART[i].dur < timeOf(CHART[j].drop.showBeat)) continue;
           const a = fieldPos(CHART[i], CHART[i].t), b = fieldPos(CHART[j], CHART[j].t);
-          if (Math.hypot(a[0] - b[0], a[1] - b[1]) < 0.07) console.warn(`${def.id}: beats ${CHART[i].beat} and ${CHART[j].beat} share a spot`);
+          if (Math.hypot(a[0] - b[0], a[1] - b[1]) < 0.07) console.warn(`${def.id}: beats ${CHART[i].beat} and ${CHART[j].beat} share a spot${PORT ? ' (upright)' : ''}`);
         }
       }
+      }
+      build(false);
       const CHORDS = def.chords;
 
       // ----- layout -----
       let W = 0, H = 0, VIEW = 1.8;
-      const F = { cx: 0, cy: 0, u: 1 }, FG = { cx: 0, cy: 0, u: 1 };
+      const F = { cx: 0, cy: 0, u: 1, portrait: false }, FG = { cx: 0, cy: 0, u: 1 };
       // field units -> screen; on tall screens the field turns a quarter
-      const toScreen = (x, y) => [F.cx + x * F.u, F.cy + y * F.u];
+      const toScreen = (x, y) => (F.portrait ? [F.cx - y * F.u, F.cy + x * F.u] : [F.cx + x * F.u, F.cy + y * F.u]);
       const noteR = () => Math.max(15, F.u * 0.045);
       // how far from a note a press still counts (generous: a little over twice the note's size)
       const hitR = () => Math.max(40, noteR() * 2.7);
@@ -810,7 +823,7 @@
           g.globalAlpha = Math.min(1, Math.sin(Math.PI * u) * 1.6) * 0.85;
           g.fillStyle = rgba(up ? ACCENT : HUES[0], 1);
           g.font = `${Math.round(Math.min(30, W * 0.06))}px "Dela Gothic One", sans-serif`;
-          g.fillText(`${up ? '▲' : '▼'} BPM ${typeof call === 'string' ? call : bpm}`, F.cx, F.cy + 0.48 * F.u * 0.86);
+          g.fillText(`${up ? '▲' : '▼'} BPM ${typeof call === 'string' ? call : bpm}`, F.cx, F.cy + (F.portrait ? 0.8 : 0.48) * F.u * 0.86);
           g.globalAlpha = 1;
         }
       }
@@ -835,7 +848,7 @@
         }
         const sec = secAt(beat), into = beat - sec.bar * BPB;
         if (sec.bar === 0 || into < 0 || into > BPB * 1.5) return;
-        const u = into / (BPB * 1.5), halfH = 0.48 * F.u;
+        const u = into / (BPB * 1.5), halfH = (F.portrait ? 0.8 : 0.48) * F.u;
         g.globalAlpha = Math.sin(Math.PI * u) * 0.24;
         g.fillStyle = rgba(HUES[sec.hue], 1);
         g.font = `${Math.round(Math.min(36, W * 0.07))}px "Dela Gothic One", sans-serif`;
@@ -860,14 +873,17 @@
         onAudioStop() { if (def.song.stop) def.song.stop(); },
         layout(w, h, snap) {
           W = w; H = h;
-          // landscape only: a phone held sideways is short, so the HUD gets a slim band and the field the rest
+          // a phone held sideways is short, so the HUD gets a slim band and the field the rest
           const sf = kit.safe, short = H < 520;
           const top = Math.max(sf.t, 0) + (short ? 40 : Math.max(70, H * 0.09)), bottom = Math.max(sf.b, short ? 12 : Math.max(30, H * 0.04));
           let x0 = 24 + sf.l;
           const x1 = W - 24 - sf.r;
           if (kit.wide()) x0 = W >= 900 ? Math.max(W * 0.42, 560) : Math.min(W * 0.55, 470 + sf.l);
           const aw = x1 - x0, ah = H - top - bottom;
-          FG.u = Math.min(aw / 2 / 0.8, ah / 2 / 0.48);
+          F.portrait = H > W;
+          FG.u = F.portrait ? Math.min(aw / 2 / 0.48, ah / 2 / 0.8) : Math.min(aw / 2 / 0.8, ah / 2 / 0.48);
+          // turned the other way: lay the chart out again, and the run carries on with it
+          if (orientDep && F.portrait !== PORT) { build(F.portrait); if (kit.rechart) kit.rechart(); }
           FG.cx = x0 + aw / 2; FG.cy = top + ah / 2;
           if (snap) Object.assign(F, FG);
           if (scene.layout) scene.layout();

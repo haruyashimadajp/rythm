@@ -38,6 +38,7 @@
     ],
     chords: [{}],
     chart({ drop, skip, wave, pulse, tip }) {
+      ABYSS_JELLY.length = 0; // (the chart is laid out again when the phone turns)
       const CY = 0, VI = 1, AQ = 2, GO = 3;
       const pat = (land, notes) => {
         const a = [];

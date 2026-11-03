@@ -138,24 +138,12 @@
   @media (prefers-reduced-motion: reduce) {
     .panel { backdrop-filter: none; -webkit-backdrop-filter: none; }
   }
-  /* landscape only: held upright, the game asks to be turned */
-  .rotate {
-    position: fixed; inset: 0; z-index: 20; display: none; place-items: center; align-content: center; gap: 22px;
-    background: var(--ink); color: var(--paper); text-align: center; padding: 24px; box-sizing: border-box;
-  }
-  .rotate p { margin: 0; font-size: 1rem; line-height: 1.7; letter-spacing: 0.06em; }
-  .rotate b { font-family: var(--font-display); font-weight: 400; font-size: 1.5rem; letter-spacing: 0.08em; display: block; margin-bottom: 4px; }
-  .rotate .phone { width: 46px; height: 80px; border: 3px solid var(--paper); border-radius: 10px; margin: 0 auto; animation: turn 2.4s ease-in-out infinite; }
-  @keyframes turn { 0%, 25% { transform: rotate(0deg); } 55%, 100% { transform: rotate(-90deg); } }
-  @media (orientation: portrait) { .rotate { display: grid; } }
-  @media (prefers-reduced-motion: reduce) { .rotate .phone { animation: none; transform: rotate(-90deg); } }
   .safe-probe { position: fixed; visibility: hidden; pointer-events: none; padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); }
 </style>
 </head>
 <body>
 <canvas id="stage" aria-label="水面"></canvas>
 <div class="safe-probe" id="safeProbe"></div>
-<div class="rotate" id="rotate" role="alert"><div class="phone" aria-hidden="true"></div><p><b>MINAMO</b>スマホを横向きにしてください</p></div>
 
 <div class="panel-wrap" id="menuWrap">
   <section class="panel" aria-labelledby="gameTitle">
@@ -335,8 +323,8 @@
     decor: () => settings.bg !== false, // background scenery on (settings)
     fx: () => settings.fx !== false && !reduceMotion, // screen shake and flashes on
     order: () => settings.order !== false, // order numbers on the notes
-    // outside of play the panel sits on the left, so songs shift their field right
-    wide: () => S.screen !== 'play',
+    // outside of play, on a wide or sideways screen the panel sits on the left, so songs shift their field right
+    wide: () => S.screen !== 'play' && (W >= 900 || W > H),
     view: (base) => base / settings.speed,
     runOf: (c) => byChart.get(c),
     holding: (n) => n.holding !== null,
@@ -409,6 +397,14 @@
     fingers.clear();
     if (M.onNewRun) M.onNewRun();
   }
+
+  // the song laid its chart out again (the phone turned): the run's notes take their new places, keeping
+  // what has been played (the chart is the same notes in the same order, only placed differently)
+  kit.rechart = () => {
+    if (!S.notes || S.notes.length !== M.chart.length) return;
+    byChart.clear();
+    S.notes.forEach((n, i) => { const c = M.chart[i]; Object.assign(n, c); n.src = c; byChart.set(c, n); });
+  };
 
   function judge(n, grade, now) {
     S.counts[grade]++;
@@ -735,7 +731,7 @@
   const currentScore = () => Math.round((1e6 * S.weight) / M.totalJudges);
   function drawHud(now) {
     const beat = M.beatOf(now);
-    const top = Math.max(12, H * 0.02);
+    const top = Math.max(12, H * 0.02) + kit.safe.t;
     const paper = hex(M.theme.paper), muted = hex(M.theme.muted);
     g.textBaseline = 'top';
     g.textAlign = 'left'; g.fillStyle = rgba(paper, 0.95);
@@ -1075,13 +1071,16 @@
     requestAnimationFrame(frame);
   }
 
+  let wasUpright = null;
   function resize() {
     DPR = Math.min(2, window.devicePixelRatio || 1);
     W = window.innerWidth; H = window.innerHeight;
     const cs = getComputedStyle($('#safeProbe'));
     Object.assign(kit.safe, { t: parseFloat(cs.paddingTop) || 0, r: parseFloat(cs.paddingRight) || 0, b: parseFloat(cs.paddingBottom) || 0, l: parseFloat(cs.paddingLeft) || 0 });
-    // held upright mid-song: the rotate screen covers the field, so the song waits
-    if (H > W) pauseGame();
+    // turned mid-song: the notes jump to their places for the new way up, so the song waits
+    const upright = H > W;
+    if (wasUpright !== null && upright !== wasUpright) pauseGame();
+    wasUpright = upright;
     cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
     g.setTransform(DPR, 0, 0, DPR, 0, 0);
     if (M) M.layout(W, H, true);
