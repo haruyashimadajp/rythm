@@ -86,9 +86,8 @@
   ];
   // the dial: each pitch has its own hour (D at twelve)
   const tkHour = (midi) => ((midi - 62) % 12 + 12) % 12;
-  // (the phone shows the field turned a quarter: field angle a appears at screen angle a + 90, so twelve
-  // o'clock on screen is field angle -180)
-  const tkHourAng = (h) => -180 + 30 * h;
+  // (twelve o'clock is straight up: field angle -90)
+  const tkHourAng = (h) => -90 + 30 * h;
   const TK_BELLS = new Set(); // beats of the midnight bells (the scene lights a numeral for each)
   const TK_GHOST = []; // melody notes the chart leaves to the music: [beat, midi, voice]
   // OVERCLOCK's tune, bar by bar: the right hand's four notes (the left hand's A comes between them)
@@ -130,8 +129,8 @@
       const FAR = 3;
       function sweep(beat, dir, hue, notes, o = {}) {
         const v = o.v ?? 0.2, lead = o.lead ?? 0.5, vert = dir === 'up' || dir === 'down', edge = vert ? 0.44 : 0.78, sx = o.sx ?? (vert ? 0.05 : 0.034);
-        // the line coming down sits a little to the left of the one going up, so where they turn their notes stay apart
-        const xo = o.x ?? (dir === 'down' ? -0.1 : dir === 'up' ? 0.1 : 0);
+        // the line coming down sits a little to the right of the one going up, so where they turn their notes stay apart
+        const xo = o.x ?? (dir === 'down' ? 0.1 : dir === 'up' ? -0.1 : 0);
         const C = { up: [xo, edge + FAR], down: [xo, -edge - FAR], right: [-edge - FAR, o.y ?? 0], left: [edge + FAR, o.y ?? 0] }[dir];
         const d = drop(beat - lead, C, hue, '', { speed: v, r0: FAR, show: 0.75 });
         const at = (b, across) => {
@@ -142,8 +141,8 @@
         for (const [q, m, h, nsx] of notes) {
           const b = beat + q * 0.5;
           if (Array.isArray(m)) { chord(b, d, m.map((x) => at(b, x - (vert ? xo : 0))), { midi: o.chordMidi || [62, 65, 69, 74].slice(0, m.length) }); continue; }
-          // across the line: higher is further toward field -x, which the phone shows as further up
-          tap(d, b, at(b, -(m - (o.mid ?? 77)) * (nsx || sx)), { midi: m, len: h ? h * 0.5 : 0 });
+          // across the line: higher is further right (on a sideways sweep, further up)
+          tap(d, b, at(b, (m - (o.mid ?? 77)) * (nsx || sx)), { midi: m, len: h ? h * 0.5 : 0 });
         }
         return d;
       }
@@ -173,23 +172,24 @@
         at.forEach((b, h) => tap(d, B(8) + b, tkHourAng(h), { midi: 74 + h }));
       }
 
-      // ===== RUNAWAY (210): four blocks of four bars; the line runs up, down, up, then a fill =====
+      // ===== RUNAWAY (210): four blocks of four bars; the line runs down, up, down, then a fill =====
       const block = (bar, k, theme) => {
         // bar 1: the stab on the kick is a row of three, then the melody; the line goes one way, back, and again
-        sweep(B(bar), 'up', k % 4, [[0, ROW3], ...theme[0].slice(1)], { chordMidi: [62, 65, 69] });
-        sweep(B(bar + 1), 'down', (k + 1) % 4, theme[1]);
-        sweep(B(bar + 2), 'up', (k + 2) % 4, free(theme[2], B(bar + 2)));
+        // (here the line coming down sits to the left: RUNAWAY is LIMIT's layout turned upside down)
+        sweep(B(bar), 'down', k % 4, [[0, ROW3], ...theme[0].slice(1)], { chordMidi: [62, 65, 69], x: -0.1 });
+        sweep(B(bar + 1), 'up', (k + 1) % 4, theme[1], { x: 0.1 });
+        sweep(B(bar + 2), 'down', (k + 2) % 4, free(theme[2], B(bar + 2)), { x: -0.1 });
         const b4 = B(bar + 3), h = (k + 3) % 4;
-        if (k === 0) sweep(b4, 'down', h, theme[3].map(([q, m, hh]) => (hh ? [q, m, 1] : [q, m])));
+        if (k === 0) sweep(b4, 'up', h, theme[3].map(([q, m, hh]) => (hh ? [q, m, 1] : [q, m])), { x: 0.1 });
         else if (k === 1) {
           // a hoover trill: two spots in turn, 16ths, then the chord they were trilling
-          pulse(b4 - 1, [0.35, 0], h, { n: 8, gap: 0.25, off: 1, widen: true, midi: [76, 73] });
-          const d = drop(b4 + 1.5, [0.1, 0], h, '', { speed: 0.13 });
+          pulse(b4 - 1, [0, -0.3], h, { n: 8, gap: 0.25, off: 1, widen: true, midi: [76, 73] });
+          const d = drop(b4 + 1.5, [-0.25, -0.05], h, '', { speed: 0.13 });
           chord(b4 + 2.5, d, tri(0), { midi: [69, 73, 76] });
         } else if (k === 2) {
           // a snare roll: six 16ths on one spot, then two rings crossing
-          pulse(b4 - 1, [0.5, 0], h, { n: 6, gap: 0.25, off: 1, widen: true, midi: 0 });
-          const A = drop(b4 + 0.5, [-0.28, -0.15], (h + 1) % 4, '', { speed: 0.12 }), C = drop(b4 + 0.5, [0.28, -0.15], (h + 2) % 4, '', { speed: 0.12 });
+          pulse(b4 - 1, [0.33, 0.1], h, { n: 6, gap: 0.25, off: 1, widen: true, first: 1, midi: 0 });
+          const A = drop(b4 + 0.5, [-0.28, 0.15], (h + 1) % 4, '', { speed: 0.12 }), C = drop(b4 + 0.5, [0.28, 0.15], (h + 2) % 4, '', { speed: 0.12 });
           cross(b4 + 3, A, C);
         } else {
           // a diminished stab (a square), then a 16th run round the same ring, and a breath before time stops
@@ -246,7 +246,7 @@
       drop(B(39) - 0.5, [0.05, 0.04], 1, '.o.H---', { speed: -0.1, r0: 0.38, a: -20, turn: -50, midi: [73, 74] });
 
       // ===== RESTART (105 -> 240): one spot struck every beat while the clock revs =====
-      pulse(B(40) - 1, [-0.35, -0.01], 0, { n: 8, gap: 1, off: 1, widen: true, midi: [50, 50, 53, 53, 57, 57, 61, 62] });
+      pulse(B(40) - 1, [-0.05, 0], 0, { n: 8, gap: 1, off: 1, widen: true, midi: [50, 50, 53, 53, 57, 57, 61, 62] });
 
       // ===== LIMIT (240): three blocks; the line runs up, across, up, then a fill =====
       const limit = (bar, j, theme) => {
@@ -257,20 +257,20 @@
         const b4 = B(bar + 3), h = (j + 1) % 4;
         if (j === 0) {
           // an 8th trill between two spots, then a triangle
-          pulse(b4 - 1, [0.3, -0.1], h, { n: 6, gap: 0.5, off: 1, widen: true, midi: [76, 73] });
-          const d = drop(b4 + 2, [0.5, 0.15], h, '', { speed: 0.14 });
+          pulse(b4 - 1, [0.3, -0.3], h, { n: 6, gap: 0.5, off: 1, widen: true, first: 1, midi: [76, 73] });
+          const d = drop(b4 + 2, [0.45, 0], h, '', { speed: 0.14 });
           chord(b4 + 3, d, tri(180), { midi: [69, 73, 76] });
         } else if (j === 1) {
           // a snare roll, then pairs
-          pulse(b4 - 1, [-0.5, 0.05], h, { n: 6, gap: 0.25, off: 1, widen: true, first: 1, midi: 0 });
+          pulse(b4 - 1, [-0.35, 0.05], h, { n: 6, gap: 0.25, off: 1, widen: true, first: 1, midi: 0 });
           const d = drop(b4 + 1, [-0.25, 0.05], h, '', { speed: 0.15 });
           chord(b4 + 2, d, [-90, 90], { midi: [76, 69] });
-          chord(b4 + 3, d, [-120, 60], { midi: [73, 69] });
+          chord(b4 + 3, d, [-30, 150], { midi: [73, 69] });
         } else {
           // stomps: triangle, triangle turned over, then the square
-          const d = drop(b4 - 1, [0.3, -0.03], h, '', { speed: 0.15 });
-          chord(b4, d, tri(180), { midi: [69, 73, 76] });
-          chord(b4 + 1, d, tri(0), { midi: [69, 73, 76] });
+          const d = drop(b4 - 1, [0.35, -0.08], h, '', { speed: 0.15 });
+          chord(b4, d, tri(0), { midi: [69, 73, 76] });
+          chord(b4 + 1, d, tri(180), { midi: [69, 73, 76] });
           chord(b4 + 2, d, sq(0), { midi: [61, 64, 67, 70] });
         }
       };
@@ -300,32 +300,32 @@
         const b = B(56 + k);
         if (k === 7) {
           // the last climb: A major, then turned over, then the square, a step faster each time
-          const d = drop(b - 1.5, [-0.25, -0.1], 0, '', { speed: 0.1 });
+          const d = drop(b - 1.5, [0.4, -0.08], 0, '', { speed: 0.1 });
           chord(b, d, tri(60), { midi: [69, 73, 76] });
           chord(b + 1, d, tri(240), { midi: [69, 73, 76] });
-          chord(b + 2, d, sq(-10), { midi: [61, 64, 67, 70] });
+          chord(b + 2, d, sq(10), { midi: [61, 64, 67, 70] });
           return;
         }
         const burst = k % 2 === 0, four = burst && k > 0;   // (a bar after a run starts with three, clear of where it ended)
         let notes = bar.slice(1).map(([q, m, h]) => (h ? [q, m, 2] : [q, m]));
         if (burst) notes = [...notes.filter(([q]) => q < 4), ...turn16(bar.find(([q]) => q === 4)[1])];
-        sweep(b, k % 2 ? 'down' : 'up', k % 4, [[0, four ? ROW4 : ROW3], ...notes], { chordMidi: four ? [62, 65, 68, 71] : [62, 65, 69], sx: 0.042, x: k % 2 ? -0.1 : 0.1 });
+        sweep(b, k % 2 ? 'down' : 'up', k % 4, [[0, four ? ROW4 : ROW3], ...notes], { chordMidi: four ? [62, 65, 68, 71] : [62, 65, 69], sx: 0.042, x: k % 2 ? 0.1 : -0.1 });
       });
 
       // ===== OVERCLOCK (320): a new tune, all rapid hits. Right and left in turn: the right hand plays the
       // tune, the left hammers the A underneath (a pedal point). Each bar is one run of eight on a ring that
       // spreads out, then one that closes in again, so every bar flows into the next; and the runs climb
-      // the screen as the tune climbs =====
+      // the screen, a step higher each bar, as the tune climbs =====
       TK_OVER.forEach((tune, k) => {
-        const b = B(64 + k), cx = 0.55 - k * 0.16, hue = (k + 2) % 4;
+        const b = B(64 + k), cy = 0.35 - k * 0.1, hue = (k + 2) % 4;
         if (k === 7) {
           // the last bar: six more, closing in on the A, and the tape runs down into midnight
-          pulse(b - 1, [cx, 0], hue, { n: 6, gap: 0.5, off: 1, widen: 'in', r0w: 0.1, show: 1, midi: [tune[0], 69, tune[1], 69, 81, 69] });
+          pulse(b - 1, [0, cy], hue, { n: 6, gap: 0.5, off: 1, widen: 'in', r0w: 0.1, show: 1, midi: [tune[0], 69, tune[1], 69, 81, 69] });
           return;
         }
         const midi = tune.flatMap((m) => [m, 69]);
         // (each run shows itself about two beats before its first hit, so the screen holds one run and the next)
-        pulse(b - 1, [cx, 0], hue, { n: 8, gap: 0.5, off: 1, widen: k % 2 ? 'in' : true, r0w: 0.06, show: k % 2 ? 1 : 1.4, midi });
+        pulse(b - 1, [0, cy], hue, { n: 8, gap: 0.5, off: 1, widen: k % 2 ? 'in' : true, r0w: 0.06, show: k % 2 ? 1 : 1.4, midi });
       });
 
       // ===== MIDNIGHT (63): twelve bells round the dial, one for every hour, then the last chord at twelve =====

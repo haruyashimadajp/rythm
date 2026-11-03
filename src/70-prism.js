@@ -229,7 +229,7 @@
             }
           }
           // the beam: white light from the left edge into the prism, a rainbow fanning out of it
-          const [px, py] = f.toScreen(-0.05, 0), ang = (F.portrait ? Math.PI / 2 : 0) + Math.sin(c.now * 0.2) * 0.25;
+          const [px, py] = f.toScreen(-0.05, 0), ang = Math.sin(c.now * 0.2) * 0.25;
           if (I > 0.02) {
             const sx = px - Math.cos(ang) * W, sy = py - Math.sin(ang) * W;
             g.globalCompositeOperation = 'lighter';

@@ -169,24 +169,25 @@
           const span = speed * gap * (n - 1), lead = closing ? 1 : r0 / speed, land = beat + off - lead;
           const d = newDrop(land, x, y, hue, closing ? { ...o, speed: -speed, r0: r0 + span + speed * lead } : { ...o, speed, r0: 0 });
           for (let q = 0; q < n; q++) {
-            const o2 = lead + q * gap, side = (q + (o.first > 0 ? 1 : 0)) % 2 ? 90 : -90;   // opts.first 1: start on the other side
+            // right, then left (opts.first 1: start on the left)
+            const o2 = lead + q * gap, left = (q + (o.first > 0 ? 1 : 0)) % 2 === 1, side = left ? -1 : 1, ang = left ? 180 : 0;
             const mid = Array.isArray(o.midi) ? o.midi[q % o.midi.length] : o.midi;
-            d.notes.push({ off: o2, offEnd: o2, ang: side * DEG, spin: 0, alt, side, midi: mid });
-            const [px, py] = ringPoint(d, o2, side * DEG);
+            d.notes.push({ off: o2, offEnd: o2, ang: ang * DEG, spin: 0, alt, side, midi: mid });
+            const [px, py] = ringPoint(d, o2, ang * DEG);
             if (!inField(px, py)) console.warn(`${def.id}: widening hits at beat ${beat} reach outside the field`);
           }
           return d;
         }
         // the pair keeps inside the field: near an edge both spots move in together
-        const py0 = y + Math.sin(a) * (o.r0 ?? 0) + Math.sin(a) * (o.speed ?? def.speed ?? 0.11) * off;
+        const px0 = x + Math.cos(a) * (o.r0 ?? 0) + Math.cos(a) * (o.speed ?? def.speed ?? 0.11) * off;
         let sides = [-w, w];
-        if (o.keep) sides = py0 + 3 * w <= BOUND_Y ? [0, 2 * w] : [0, -2 * w];
-        const lo = py0 + Math.min(...sides), hi = py0 + Math.max(...sides);
-        const shift = Math.min(0, BOUND_Y - hi) + Math.max(0, -BOUND_Y - lo);
-        sides.map((v) => v + shift).forEach((dy, side) => {
+        if (o.keep) sides = px0 + 3 * w <= BOUND_X ? [0, 2 * w] : [0, -2 * w];
+        const lo = px0 + Math.min(...sides), hi = px0 + Math.max(...sides);
+        const shift = Math.min(0, BOUND_X - hi) + Math.max(0, -BOUND_X - lo);
+        sides.map((v) => v + shift).forEach((dx, side) => {
           const cnt = Math.ceil((n - side) / 2);
           if (cnt <= 0) return;
-          const d = newDrop(beat + side * gap, x, y + dy, hue, { ...o, rings: cnt, gap: gap * 2 });
+          const d = newDrop(beat + side * gap, x + dx, y, hue, { ...o, rings: cnt, gap: gap * 2 });
           const id = ++jackId;
           for (let k = 0; k < cnt; k++) {
             const q = side + k * 2, mid = Array.isArray(o.midi) ? o.midi[q % o.midi.length] : o.midi;
@@ -362,9 +363,9 @@
 
       // ----- layout -----
       let W = 0, H = 0, VIEW = 1.8;
-      const F = { cx: 0, cy: 0, u: 1, portrait: false }, FG = { cx: 0, cy: 0, u: 1 };
+      const F = { cx: 0, cy: 0, u: 1 }, FG = { cx: 0, cy: 0, u: 1 };
       // field units -> screen; on tall screens the field turns a quarter
-      const toScreen = (x, y) => (F.portrait ? [F.cx - y * F.u, F.cy + x * F.u] : [F.cx + x * F.u, F.cy + y * F.u]);
+      const toScreen = (x, y) => [F.cx + x * F.u, F.cy + y * F.u];
       const noteR = () => Math.max(15, F.u * 0.045);
       // how far from a note a press still counts (generous: a little over twice the note's size)
       const hitR = () => Math.max(40, noteR() * 2.7);
@@ -809,7 +810,7 @@
           g.globalAlpha = Math.min(1, Math.sin(Math.PI * u) * 1.6) * 0.85;
           g.fillStyle = rgba(up ? ACCENT : HUES[0], 1);
           g.font = `${Math.round(Math.min(30, W * 0.06))}px "Dela Gothic One", sans-serif`;
-          g.fillText(`${up ? '▲' : '▼'} BPM ${typeof call === 'string' ? call : bpm}`, F.cx, F.cy + (F.portrait ? 0.8 : 0.48) * F.u * 0.86);
+          g.fillText(`${up ? '▲' : '▼'} BPM ${typeof call === 'string' ? call : bpm}`, F.cx, F.cy + 0.48 * F.u * 0.86);
           g.globalAlpha = 1;
         }
       }
@@ -834,7 +835,7 @@
         }
         const sec = secAt(beat), into = beat - sec.bar * BPB;
         if (sec.bar === 0 || into < 0 || into > BPB * 1.5) return;
-        const u = into / (BPB * 1.5), halfH = (F.portrait ? 0.8 : 0.48) * F.u;
+        const u = into / (BPB * 1.5), halfH = 0.48 * F.u;
         g.globalAlpha = Math.sin(Math.PI * u) * 0.24;
         g.fillStyle = rgba(HUES[sec.hue], 1);
         g.font = `${Math.round(Math.min(36, W * 0.07))}px "Dela Gothic One", sans-serif`;
@@ -859,13 +860,14 @@
         onAudioStop() { if (def.song.stop) def.song.stop(); },
         layout(w, h, snap) {
           W = w; H = h;
-          const top = Math.max(70, H * 0.09), bottom = Math.max(30, H * 0.04);
-          let x0 = 24;
-          const x1 = W - 24;
-          if (kit.wide()) x0 = Math.max(W * 0.42, 560);
+          // landscape only: a phone held sideways is short, so the HUD gets a slim band and the field the rest
+          const sf = kit.safe, short = H < 520;
+          const top = Math.max(sf.t, 0) + (short ? 40 : Math.max(70, H * 0.09)), bottom = Math.max(sf.b, short ? 12 : Math.max(30, H * 0.04));
+          let x0 = 24 + sf.l;
+          const x1 = W - 24 - sf.r;
+          if (kit.wide()) x0 = W >= 900 ? Math.max(W * 0.42, 560) : Math.min(W * 0.55, 470 + sf.l);
           const aw = x1 - x0, ah = H - top - bottom;
-          F.portrait = ah > aw * 1.2;
-          FG.u = F.portrait ? Math.min(aw / 2 / 0.48, ah / 2 / 0.8) : Math.min(aw / 2 / 0.8, ah / 2 / 0.48);
+          FG.u = Math.min(aw / 2 / 0.8, ah / 2 / 0.48);
           FG.cx = x0 + aw / 2; FG.cy = top + ah / 2;
           if (snap) Object.assign(F, FG);
           if (scene.layout) scene.layout();

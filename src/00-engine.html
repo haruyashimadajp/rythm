@@ -120,16 +120,42 @@
     .songs { gap: 6px; }
     .song-card { padding: 7px 12px; }
   }
-  @media (max-height: 700px) and (max-width: 899px) {
-    #titleWrap .lede, #titleWrap .how, #menuWrap .lede { display: none; }
+  @media (max-height: 700px) {
+    #titleWrap .lede, #menuWrap .lede { display: none; }
+    /* the how-to moves below the buttons (scroll down to read it) */
+    #titleWrap .how { order: 1; border-top: 1px solid var(--line); padding-top: 12px; }
+    #titleWrap .best { order: 2; }
+  }
+  /* a phone held sideways: a slimmer panel so more of it fits */
+  @media (max-height: 520px) {
+    .panel-wrap { align-items: center; }
+    .panel { padding: 14px 16px 12px; gap: 10px; }
+    h1 { font-size: 2rem; }
+    .songs { gap: 6px; }
+    .song-card { padding: 6px 12px; }
+    .rank { font-size: 3rem; }
   }
   @media (prefers-reduced-motion: reduce) {
     .panel { backdrop-filter: none; -webkit-backdrop-filter: none; }
   }
+  /* landscape only: held upright, the game asks to be turned */
+  .rotate {
+    position: fixed; inset: 0; z-index: 20; display: none; place-items: center; align-content: center; gap: 22px;
+    background: var(--ink); color: var(--paper); text-align: center; padding: 24px; box-sizing: border-box;
+  }
+  .rotate p { margin: 0; font-size: 1rem; line-height: 1.7; letter-spacing: 0.06em; }
+  .rotate b { font-family: var(--font-display); font-weight: 400; font-size: 1.5rem; letter-spacing: 0.08em; display: block; margin-bottom: 4px; }
+  .rotate .phone { width: 46px; height: 80px; border: 3px solid var(--paper); border-radius: 10px; margin: 0 auto; animation: turn 2.4s ease-in-out infinite; }
+  @keyframes turn { 0%, 25% { transform: rotate(0deg); } 55%, 100% { transform: rotate(-90deg); } }
+  @media (orientation: portrait) { .rotate { display: grid; } }
+  @media (prefers-reduced-motion: reduce) { .rotate .phone { animation: none; transform: rotate(-90deg); } }
+  .safe-probe { position: fixed; visibility: hidden; pointer-events: none; padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); }
 </style>
 </head>
 <body>
 <canvas id="stage" aria-label="水面"></canvas>
+<div class="safe-probe" id="safeProbe"></div>
+<div class="rotate" id="rotate" role="alert"><div class="phone" aria-hidden="true"></div><p><b>MINAMO</b>スマホを横向きにしてください</p></div>
 
 <div class="panel-wrap" id="menuWrap">
   <section class="panel" aria-labelledby="gameTitle">
@@ -304,12 +330,13 @@
   const kit = {
     g, rgba, hex, mix, hash, mulberry32, TAU, DEG, S, settings, reduceMotion, WIN,
     get W() { return W; }, get H() { return H; },
+    safe: { t: 0, r: 0, b: 0, l: 0 }, // the screen's safe-area insets (the notch side of a phone held sideways)
     playing: () => S.screen === 'play',
     decor: () => settings.bg !== false, // background scenery on (settings)
     fx: () => settings.fx !== false && !reduceMotion, // screen shake and flashes on
     order: () => settings.order !== false, // order numbers on the notes
-    // wide screens keep the panel on the left outside of play, so songs shift their field right
-    wide: () => W >= 900 && S.screen !== 'play',
+    // outside of play the panel sits on the left, so songs shift their field right
+    wide: () => S.screen !== 'play',
     view: (base) => base / settings.speed,
     runOf: (c) => byChart.get(c),
     holding: (n) => n.holding !== null,
@@ -713,22 +740,23 @@
     g.textBaseline = 'top';
     g.textAlign = 'left'; g.fillStyle = rgba(paper, 0.95);
     g.font = '22px "Dela Gothic One", sans-serif';
-    g.fillText(fmtScore(currentScore()), 18, top + 8);
+    const hl = 18 + kit.safe.l;
+    g.fillText(fmtScore(currentScore()), hl, top + 8);
     if (S.combo >= 5) {
       g.font = '18px "Dela Gothic One", sans-serif';
       g.fillStyle = rgba(hex(M.theme.accent), 0.95);
-      g.fillText(String(S.combo), 18, top + 38);
+      g.fillText(String(S.combo), hl, top + 38);
       const w = g.measureText(String(S.combo)).width;
       g.font = '700 11px "Zen Kaku Gothic New", sans-serif';
       g.fillStyle = rgba(paper, 0.7);
-      g.fillText('COMBO', 24 + w, top + 44);
+      g.fillText('COMBO', hl + 6 + w, top + 44);
     }
     const sec = M.sections[kit.secIndex(M.sections, Math.max(0, Math.floor(beat / M.bpb)))];
     g.textAlign = 'right'; g.fillStyle = rgba(muted, 1);
     g.font = '700 12px "Zen Kaku Gothic New", sans-serif';
     // narrow screens keep only what changes: the section (and the tempo, if it moves)
     const bpmText = M.varies ? ` ・ BPM ${Math.round(M.bpmAt(beat))}` : '';
-    g.fillText(W < 560 ? `${sec.name}${bpmText}` : `${M.title} ・ ${sec.name}${bpmText} ・ ${S.auto ? 'AUTO' : 'PLAY'}`, W - 66, top + 12);
+    g.fillText(W < 560 ? `${sec.name}${bpmText}` : `${M.title} ・ ${sec.name}${bpmText} ・ ${S.auto ? 'AUTO' : 'PLAY'}`, W - 66 - kit.safe.r, top + 12);
     const prog = Math.min(1, Math.max(0, now / (M.songEnd - 0.8)));
     g.fillStyle = rgba(paper, 0.12); g.fillRect(0, 0, W, 3);
     g.fillStyle = M.progressColor ? M.progressColor(beat) : rgba(hex(M.theme.accent), 0.9);
@@ -1050,6 +1078,10 @@
   function resize() {
     DPR = Math.min(2, window.devicePixelRatio || 1);
     W = window.innerWidth; H = window.innerHeight;
+    const cs = getComputedStyle($('#safeProbe'));
+    Object.assign(kit.safe, { t: parseFloat(cs.paddingTop) || 0, r: parseFloat(cs.paddingRight) || 0, b: parseFloat(cs.paddingBottom) || 0, l: parseFloat(cs.paddingLeft) || 0 });
+    // held upright mid-song: the rotate screen covers the field, so the song waits
+    if (H > W) pauseGame();
     cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
     g.setTransform(DPR, 0, 0, DPR, 0, 0);
     if (M) M.layout(W, H, true);
