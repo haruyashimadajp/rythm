@@ -2,7 +2,8 @@
 
 A hardcore track whose tempo will not hold still: a music box winds up at 126, the clock runs away
 at 210, time stops dead, a dial ticks at 168 and 252, the water sinks to 84 and rewinds, the clock
-revs back up to 240, grinds, freezes, tears loose at 252 and strikes midnight at 63. D minor.
+revs back up to 240, grinds, freezes, tears loose at 252 (with runs of 16ths), climbs a step every beat
+to an overclocked 320, and strikes midnight at 63. D minor.
 
 The notes of the chart are the song's own notes: songs/tokei-notes.json (written from the chart by
 songs/dump-chart.js) gives every note's beat, length, pitch and instrument, and this program plays
@@ -58,7 +59,8 @@ def bpm_at(b):
         if (q['b'] < b) if q['stop'] else (q['b'] <= b): p = q
         else: break
     return 60 / p['spb']
-END_BEAT = 264
+END_BEAT = 296
+MID = 288                   # midnight: the first bell
 N = int((bt(END_BEAT) + 7.0) * SR)
 
 def mtof(m): return 440.0 * 2 ** ((np.asarray(m, float) - 69) / 12)
@@ -351,7 +353,7 @@ for beat, ln, m, voice, is_chord in D['notes']:
     elif voice == 'hoov':
         lead.add(t, hoover(m, gate_for(beat, ln) + (0.08 if is_chord else 0)), 0.26 if is_chord else 0.32)
     elif voice == 'bell':
-        bells.add(t, bell(m, 7.0 if beat >= 260 else 5.0), 0.5 if beat >= 260 else 0.42, 0.35 * np.sin(m * 1.3))
+        bells.add(t, bell(m, 7.0 if beat >= MID + 4 else 5.0), 0.5 if beat >= MID + 4 else 0.42, 0.35 * np.sin(m * 1.3))
 for beat, m, voice in D['ghosts']:
     if voice == 'box': keys.add(bt(beat), music_box(m, 1.3), 0.28, 0.15)
     else: lead.add(bt(beat), supersaw(m, gate_for(beat, 0)), 0.26)
@@ -488,14 +490,23 @@ for bar in range(56, 64):
 fxb.add(bt(224), impact(), 0.5)
 fxb.add(bt(252), riser(blen(252, 4)), 0.4)
 
-# MIDNIGHT (bars 64-65, 63): the tower strikes twelve
-fxb.add(bt(256), gong(), 0.5)
-pads.add(bt(256), strings([50, 57, 62, 65], blen(256, 4), cut=1200, att=1.0), 0.3)
-pads.add(bt(256), choir([62, 65, 69], blen(256, 4), att=1.5), 0.15)
-bass.add(bt(256), reese(38, blen(256, 4)), 0.35)
-K(260); CR(260, 1.5); fxb.add(bt(260), impact(), 0.6); fxb.add(bt(260), gong(9.0), 0.5)
-pads.add(bt(260), choir([62, 69, 74, 77], 5.5, att=0.05), 0.25)
-pads.add(bt(260), strings([38, 50, 57, 62, 65, 69], 5.5, cut=2000, att=0.02), 0.32)
+# OVERCLOCK (bars 64-71, 320): the clock overclocked: speedcore, a crash every two bars, the choir on top
+fxb.add(bt(256), impact(), 0.55)
+for bar in range(64, 72):
+    hardcore_bar(bar, 2, 64, hats16=False)
+    b0 = bar * 4
+    pads.add(bt(b0), choir([n + 12 for n in chord(bar)[:3]], blen(b0, 4), att=0.05), 0.22)
+    for q in range(4): ticks.add(bt(b0 + q + 0.5), tick(q % 2 == 1), 0.18, 0.5)
+    if bar == 71: fxb.add(bt(b0), riser(blen(b0, 3)), 0.4)
+
+# MIDNIGHT (bars 72-73, 63): the tower strikes twelve
+fxb.add(bt(MID), gong(), 0.5)
+pads.add(bt(MID), strings([50, 57, 62, 65], blen(MID, 4), cut=1200, att=1.0), 0.3)
+pads.add(bt(MID), choir([62, 65, 69], blen(MID, 4), att=1.5), 0.15)
+bass.add(bt(MID), reese(38, blen(MID, 4)), 0.35)
+K(MID + 4); CR(MID + 4, 1.5); fxb.add(bt(MID + 4), impact(), 0.6); fxb.add(bt(MID + 4), gong(9.0), 0.5)
+pads.add(bt(MID + 4), choir([62, 69, 74, 77], 5.5, att=0.05), 0.25)
+pads.add(bt(MID + 4), strings([38, 50, 57, 62, 65, 69], 5.5, cut=2000, att=0.02), 0.32)
 
 # the clock in the stops: only the ticks go on while time stands still
 for b, s in D['stops']:
@@ -564,6 +575,8 @@ rc = rev_crash(0.9)
 mix[:, int((t_stop1 + len1 - 0.9) * SR):int((t_stop1 + len1) * SR)] += np.vstack([rc, rc])[:, :int(0.9 * SR)] * 0.25
 s2, len2 = D['stops'][1]
 freeze(mix, bt(s2) + 0.02, len2 - 0.04)
+# out of the overclock the tape runs down in one beat, and midnight comes in slow
+tape_stop(mix, bt(MID - 1), blen(MID - 1, 1))
 
 # the rewind (bars 38-39): the runaway's sound played backwards, speeding up, under the piano
 src = mix[:, int(bt(72) * SR):int(bt(80) * SR)][:, ::-1]

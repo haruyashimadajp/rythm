@@ -596,8 +596,9 @@
           if (n.revealT !== undefined && now < n.revealT) continue;
           const col = HUES[n.drop.hue];
           const appear = shown * (ap ? ap.a : D ? 1 : Math.min(1, (VIEW - (n.t - now)) / 0.3) * (n.revealT !== undefined ? Math.min(1, (now - n.revealT) / 0.15) : 1));
-          if (D && n.dur > 0 && n.tail === null && n.head !== 'miss') {
-            // a hold coming to a standing ring trails its body back along the way it comes
+          if (D && n.dur > 0 && !n.spin && n.tail === null && n.head !== 'miss') {
+            // a hold coming to a standing ring trails its body back along the way it comes (one that sweeps
+            // round the ring instead shows that arc, drawn below)
             const R = ringR(n.drop, 0), [cx, cy] = ringC(n.drop, n.beat - n.drop.beat), a = n.ang + n.spin, sh = shape(a);
             const clampR = (v) => (D.dir > 0 ? Math.max(0, Math.min(R, v)) : Math.max(R, Math.min(R + 0.9, v)));
             const rh = clampR(ap ? ap.r : R), rt = clampR(R - D.dir * D.v * (n.beat + n.len - nowBeat));
