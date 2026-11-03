@@ -156,10 +156,25 @@
       // right then left on a phone held upright (the field's y runs across its screen), one for each thumb:
       // two pulse trains a beat-gap apart, each from its own drop, opts.spread field units apart, either side of
       // [x, y] (or, with opts.keep, the first spot stays at [x, y] and the second goes beside it).
+      // With opts.widen they ride one spreading ring instead, struck right, left, right... on either side of
+      // its centre ([x, y]), so each pair is a little wider than the last; the first hit is at beat + off.
       let altId = 0;
       function pulse(beat, [x, y], hue, o = {}) {
         const n = o.n ?? 3, gap = o.gap ?? 0.5, off = o.off ?? 1, a = (o.a ?? -90) * DEG, w = (o.spread ?? 0.24) / 2;
         const alt = ++altId, drops = [];
+        if (o.widen) {
+          // a hit lands each gap; the ring grows so that each side's next hit is 0.1 further out
+          const speed = 0.1 / (2 * gap), r0 = o.r0w ?? 0.07, land = beat + off - r0 / speed;
+          const d = newDrop(land, x, y, hue, { ...o, speed, r0: 0 });
+          for (let q = 0; q < n; q++) {
+            const o2 = r0 / speed + q * gap, side = (q + (o.first > 0 ? 1 : 0)) % 2 ? 90 : -90;   // opts.first 1: start on the other side
+            const mid = Array.isArray(o.midi) ? o.midi[q % o.midi.length] : o.midi;
+            d.notes.push({ off: o2, offEnd: o2, ang: side * DEG, spin: 0, alt, midi: mid });
+            const [px, py] = ringPoint(d, o2, side * DEG);
+            if (!inField(px, py)) console.warn(`${def.id}: widening hits at beat ${beat} reach outside the field`);
+          }
+          return d;
+        }
         // the pair keeps inside the field: near an edge both spots move in together
         const py0 = y + Math.sin(a) * (o.r0 ?? 0) + Math.sin(a) * (o.speed ?? def.speed ?? 0.11) * off;
         let sides = [-w, w];
@@ -265,7 +280,7 @@
         if (d.stone) d.stone.t = timeOf(d.stone.beat);
         d.notes.forEach((n, i) => {
           const beat = d.beat + n.off, t = timeOf(beat);
-          CHART.push({ beat, t, dur: timeOf(d.beat + n.offEnd) - t, len: n.offEnd - n.off, drop: d, ang: n.ang, spin: n.spin, ring: n.ring || 0, idx: i, skip: !!n.skip, pair: n.pair, cross: n.cross, chord: !!n.chord, jack: n.jack, dark: d.dark, midi: n.midi });
+          CHART.push({ beat, t, dur: timeOf(d.beat + n.offEnd) - t, len: n.offEnd - n.off, drop: d, ang: n.ang, spin: n.spin, ring: n.ring || 0, idx: i, skip: !!n.skip, pair: n.pair, cross: n.cross, chord: !!n.chord, jack: n.jack, alt: n.alt, dark: d.dark, midi: n.midi });
         });
         d.last = timeOf(d.beat + Math.max(0, ...d.notes.map((n) => n.offEnd)));
         // a ring that closes in vanishes at its centre
@@ -321,6 +336,7 @@
         // close spots, or a run whose notes stay close)
         // the two spots of rapid hits take a thumb each, so going from one to the other is no reach
         if (a.jack && b.jack && a.jack.alt === b.jack.alt) continue;
+        if (a.alt && a.alt === b.alt) continue;
         if (gap < 0.055 || (gap < 0.1 && !(a.jack && b.jack && a.jack.id === b.jack.id) && dist > 0.2) || dist / Math.max(gap, 0.01) > 2.2) console.warn(`${def.id}: beat ${b.beat}: ${gap.toFixed(2)} s after the last note but ${dist.toFixed(2)} away`);
       }
       for (let i = 0; i < CHART.length; i++) {

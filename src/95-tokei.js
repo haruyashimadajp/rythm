@@ -16,8 +16,8 @@
   //   - other chord stabs are chords on one ring: 2, 3 or 4 notes it
   //     reaches at once (triangles and squares come from the augmented
   //     and diminished chords, which are symmetric themselves)
-  //   - rapid hits (a drum roll, a hoover trill) alternate between two
-  //     spots side by side, one for each thumb
+  //   - rapid hits (a drum roll, a hoover trill) alternate right and left
+  //     on one spreading ring, a little wider apart each time
   //   - on the dial, each pitch has its own hour (D at twelve, E at two,
   //     F at three ... C sharp at eleven), so a chromatic run goes once
   //     round the clock
@@ -181,12 +181,12 @@
         if (k === 0) sweep(b4, 'down', h, theme[3].map(([q, m, hh]) => (hh ? [q, m, 1] : [q, m])));
         else if (k === 1) {
           // a hoover trill: two spots in turn, 16ths, then the chord they were trilling
-          pulse(b4 - 1, [-0.17, -0.12], h, { n: 8, gap: 0.25, off: 1, a: -90, speed: 0.15, midi: [76, 73] });
-          const d = drop(b4 + 1.5, [-0.15, 0.05], h, '', { speed: 0.13 });
+          pulse(b4 - 1, [0.35, 0], h, { n: 8, gap: 0.25, off: 1, widen: true, midi: [76, 73] });
+          const d = drop(b4 + 1.5, [0.1, 0], h, '', { speed: 0.13 });
           chord(b4 + 2.5, d, tri(0), { midi: [69, 73, 76] });
         } else if (k === 2) {
           // a snare roll: six 16ths on one spot, then two rings crossing
-          pulse(b4 - 1, [-0.15, -0.15], h, { n: 6, gap: 0.25, off: 1, a: -90, speed: 0.12, midi: 0 });
+          pulse(b4 - 1, [0.5, 0], h, { n: 6, gap: 0.25, off: 1, widen: true, midi: 0 });
           const A = drop(b4 + 0.5, [-0.28, -0.15], (h + 1) % 4, '', { speed: 0.12 }), C = drop(b4 + 0.5, [0.28, -0.15], (h + 2) % 4, '', { speed: 0.12 });
           cross(b4 + 3, A, C);
         } else {
@@ -244,26 +244,26 @@
       drop(B(39) - 0.5, [0.05, 0.04], 1, '.o.H---', { speed: -0.1, r0: 0.38, a: -20, turn: -50, midi: [73, 74] });
 
       // ===== RESTART (105 -> 240): one spot struck every beat while the clock revs =====
-      pulse(B(40) - 1, [-0.2, 0.03], 0, { n: 8, gap: 1, off: 1, a: -90, speed: 0.15, midi: [50, 50, 53, 53, 57, 57, 61, 62] });
+      pulse(B(40) - 1, [-0.35, -0.01], 0, { n: 8, gap: 1, off: 1, widen: true, midi: [50, 50, 53, 53, 57, 57, 61, 62] });
 
       // ===== LIMIT (240): three blocks; the line runs up, across, up, then a fill =====
       const limit = (bar, j, theme) => {
         sweep(B(bar), 'up', (j + 2) % 4, [[0, ROW4], ...theme[0].slice(1)], { chordMidi: [62, 65, 68, 71] });
         sweep(B(bar + 1), 'down', (j + 3) % 4, theme[1]);
-        if (j === 1) skip(B(bar + 2), [0.3, 0.38], [0.62, -0.3], j % 4, 'oooooooo', { midi: theme[2].map((n) => n[1]) });
+        if (j === 1) skip(B(bar + 2), [0.3, 0.38], [-0.4, 0.3], j % 4, 'oooooooo', { midi: theme[2].map((n) => n[1]) });
         else sweep(B(bar + 2), 'up', j % 4, free(theme[2], B(bar + 2)));
         const b4 = B(bar + 3), h = (j + 1) % 4;
         if (j === 0) {
           // an 8th trill between two spots, then a triangle
-          pulse(b4 - 1, [0.3, -0.4], h, { n: 6, gap: 0.5, off: 1, a: 90, speed: 0.15, midi: [76, 73] });
-          const d = drop(b4 + 2, [0.45, 0.05], h, '', { speed: 0.14 });
-          chord(b4 + 3, d, tri(0), { midi: [69, 73, 76] });
+          pulse(b4 - 1, [0.3, -0.1], h, { n: 6, gap: 0.5, off: 1, widen: true, midi: [76, 73] });
+          const d = drop(b4 + 2, [0.5, 0.15], h, '', { speed: 0.14 });
+          chord(b4 + 3, d, tri(180), { midi: [69, 73, 76] });
         } else if (j === 1) {
           // a snare roll, then pairs
-          pulse(b4 - 1, [0.57, -0.3], h, { n: 6, gap: 0.25, off: 1, a: 180, speed: 0.12, midi: 0 });
-          const d = drop(b4 + 1, [0.2, -0.15], h, '', { speed: 0.15 });
+          pulse(b4 - 1, [-0.5, 0.05], h, { n: 6, gap: 0.25, off: 1, widen: true, first: 1, midi: 0 });
+          const d = drop(b4 + 1, [-0.25, 0.05], h, '', { speed: 0.15 });
           chord(b4 + 2, d, [-90, 90], { midi: [76, 69] });
-          chord(b4 + 3, d, [-60, 120], { midi: [73, 69] });
+          chord(b4 + 3, d, [-120, 60], { midi: [73, 69] });
         } else {
           // stomps: triangle, triangle turned over, then the square
           const d = drop(b4 - 1, [0.3, -0.03], h, '', { speed: 0.15 });
@@ -342,7 +342,7 @@
         if (bar >= 26 && bar < 34) return n.chord ? 'chimestab' : 'chime';
         if (bar >= 40 && bar < 42) return 'hoov';
         if (n.jack && bar >= 56 && n.midi) return 'saw';   // the 16th runs of the last runaway
-        return n.chord || n.jack ? 'hoov' : 'saw';
+        return n.chord || n.jack || n.alt ? 'hoov' : 'saw';
       },
     },
     scene(kit, f) {
