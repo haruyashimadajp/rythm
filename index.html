@@ -1667,9 +1667,12 @@
           }
           if (n.dur > 0 && n.tail === null && n.head !== 'miss') {
             // hold: a channel along the path the ripple front will take; the light rides the front
+            // (once the light is on its way, only the stretch still ahead of it is drawn: the part behind would
+            // otherwise look like more to come, most of all outside a ring that is closing in)
+            const from = Math.max(n.t, Math.min(now, n.end));
             g.globalAlpha = appear;
             g.beginPath();
-            for (let k = 0; k <= 24; k++) { const [px, py] = notePos(n, n.t + (n.dur * k) / 24); if (k) g.lineTo(px, py); else g.moveTo(px, py); }
+            for (let k = 0; k <= 24; k++) { const [px, py] = notePos(n, from + ((n.end - from) * k) / 24); if (k) g.lineTo(px, py); else g.moveTo(px, py); }
             g.strokeStyle = rgba(col, 0.22); g.lineWidth = r * 1.6; g.stroke();
             g.strokeStyle = rgba(col, 0.7); g.lineWidth = 1.5; g.stroke();
             const b = notePos(n, n.end), f = notePos(n, now);
@@ -1954,7 +1957,7 @@
           if (grade !== 'miss' && S.combo > 0 && S.combo % 50 === 0) waves.push({ x, y, col: HUES[n.drop.hue], combo: S.combo, life: 0 });
           if (scene.hit) scene.hit(ctx, n, grade, x, y);
         },
-        debug: { notePos: (c, t) => notePos(kit.runOf(c) || c, t), fieldPos },
+        debug: { notePos: (c, t) => notePos(kit.runOf(c) || c, t), fieldPos, ringAt: (d, t) => { const off = beatOf(t) - d.beat; return [...ringC(d, off), ringR(d, off)]; } },
         onNewRun() {
           particles.length = 0; rings.length = 0; waves.length = 0; popups = [];
           autoAim.x = F.cx; autoAim.y = F.cy; lastNow = -Infinity; shakeV = 0; flashV = 0;
