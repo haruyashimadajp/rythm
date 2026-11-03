@@ -82,9 +82,11 @@
   ];
   // the dial: each pitch has its own hour (D at twelve)
   const tkHour = (midi) => ((midi - 62) % 12 + 12) % 12;
-  const tkHourAng = (h) => -90 + 30 * h;
+  // (the phone shows the field turned a quarter: field angle a appears at screen angle a + 90, so twelve
+  // o'clock on screen is field angle -180)
+  const tkHourAng = (h) => -180 + 30 * h;
   const TK_BELLS = new Set(); // beats of the midnight bells (the scene lights a numeral for each)
-  const TK_GHOST = []; // melody notes the chart leaves to the music: [beat, midi]
+  const TK_GHOST = []; // melody notes the chart leaves to the music: [beat, midi, voice]
 
   rippleSong({
     id: 'tokei', title: 'TOKEI', jp: '狂い時計', genre: 'Hardcore（変速）', level: 10, bpmLabel: '63–252',
@@ -92,6 +94,9 @@
     theme: { ink: '#060509', ink2: '#1d1420', panel: 'rgba(6, 5, 9, 0.86)', paper: '#fff3df', muted: '#b9a68c', accent: '#ffc94d' },
     hues: ['#ffc94d', '#5ad8ff', '#ff4d6a', '#c08cff'],
     bpm: 126, tempo: TOKEI_TEMPO, stops: TOKEI_STOPS, bars: 66, speed: 0.1, attractFromBar: 10,
+    // the music is a recording made by songs/tokei-compose.py from this very chart (beat 0 is 2 s in, after the key winds the clock)
+    audioFile: { src: 'audio/tokei.mp3', t0: 2.0 },
+    pulse: kickPulse(typeof TOKEI_KICKS === 'undefined' ? [] : TOKEI_KICKS),
     sections: [
       { bar: 0, name: 'WIND-UP', hue: 0 }, { bar: 8, name: 'ACCEL', hue: 1 }, { bar: 10, name: 'RUNAWAY', hue: 2 },
       { bar: 26, name: 'DIAL', hue: 1 }, { bar: 34, name: 'STILL WATER', hue: 3 }, { bar: 40, name: 'RESTART', hue: 0 },
@@ -131,18 +136,21 @@
         for (const [q, m, h] of notes) {
           const b = beat + q * 0.5;
           if (Array.isArray(m)) { chord(b, d, m.map((x) => at(b, x - (vert ? xo : 0))), { midi: o.chordMidi || [62, 65, 69, 74].slice(0, m.length) }); continue; }
-          tap(d, b, at(b, (m - (o.mid ?? 77)) * sx), { midi: m, len: h ? h * 0.5 : 0 });
+          // across the line: higher is further toward field -x, which the phone shows as further up
+          tap(d, b, at(b, -(m - (o.mid ?? 77)) * sx), { midi: m, len: h ? h * 0.5 : 0 });
         }
         return d;
       }
       const ROW3 = [-0.45, 0, 0.45], ROW4 = [-0.5, -0.2, 0.2, 0.5];
       // a run of straight 8ths leaves its last 8th to the music, so the hand is free for the chord row that follows
-      const free = (bar, beat) => bar.filter(([q, m]) => (q === 7 ? (TK_GHOST.push([beat + 3.5, m]), false) : true));
+      const free = (bar, beat) => bar.filter(([q, m]) => (q === 7 ? (TK_GHOST.push([beat + 3.5, m, 'saw']), false) : true));
       const tri = (rot) => [rot - 90, rot + 30, rot + 150];
       const sq = (rot) => [rot - 45, rot + 45, rot + 135, rot + 225];
       const quarters = (bar) => bar.filter(([q]) => q % 2 === 0);
 
       // ===== WIND-UP (126): the music box; the chart takes the quarter notes, fans swinging left and right =====
+      // (the music box plays the 8ths in between)
+      [...TK_A, ...TK_B.slice(0, 3)].forEach((bar, k) => bar.forEach(([q, m]) => { if (q % 2) TK_GHOST.push([B(k) + q / 2, m, 'box']); }));
       TK_A.forEach((bar, k) => fan(B(k), [k % 2 ? 0.32 : -0.32, 0.2], k % 4, quarters(bar).map(([q, m, h]) => (h ? [q / 2, m, 1] : [q / 2, m])), { step: 1, speed: 0.1, from: k % 2 ? -170 : -140, span: 120 }));
       TK_B.slice(0, 3).forEach((bar, k) => fan(B(4 + k), [[-0.3, -0.2], [0.3, 0.2], [-0.3, 0.2]][k], (k + 1) % 4, quarters(bar).map(([q, m]) => [q / 2, m]), { step: 1, speed: 0.1, from: [10, -170, -140][k], span: 120 }));
       {
@@ -156,27 +164,27 @@
       {
         const d = drop(B(8) - 1, [0, 0.03], 1, '', { speed: 0.022, r0: 0.17 });
         const at = [0, 1, 2, 3, 4, 4.5, 5, 5.5, 6, 6.5, 7, 7.5];
-        at.forEach((b, h) => tap(d, B(8) + b, tkHourAng(h - 1), { midi: 74 + h }));
+        at.forEach((b, h) => tap(d, B(8) + b, tkHourAng(h), { midi: 74 + h }));
       }
 
       // ===== RUNAWAY (210): four blocks of four bars; the line runs up, down, up, then a fill =====
       const block = (bar, k, theme) => {
-        // bar 1: the stab on the kick is a row of three, then the melody; the line comes down, goes up, comes down
-        sweep(B(bar), 'down', k % 4, [[0, ROW3], ...theme[0].slice(1)], { chordMidi: [62, 65, 69] });
-        sweep(B(bar + 1), 'up', (k + 1) % 4, theme[1]);
-        sweep(B(bar + 2), 'down', (k + 2) % 4, free(theme[2], B(bar + 2)));
+        // bar 1: the stab on the kick is a row of three, then the melody; the line goes one way, back, and again
+        sweep(B(bar), 'up', k % 4, [[0, ROW3], ...theme[0].slice(1)], { chordMidi: [62, 65, 69] });
+        sweep(B(bar + 1), 'down', (k + 1) % 4, theme[1]);
+        sweep(B(bar + 2), 'up', (k + 2) % 4, free(theme[2], B(bar + 2)));
         const b4 = B(bar + 3), h = (k + 3) % 4;
-        if (k === 0) sweep(b4, 'up', h, theme[3].map(([q, m, hh]) => (hh ? [q, m, 1] : [q, m])));
+        if (k === 0) sweep(b4, 'down', h, theme[3].map(([q, m, hh]) => (hh ? [q, m, 1] : [q, m])));
         else if (k === 1) {
           // a hoover trill: two spots in turn, 16ths, then the chord they were trilling
-          pulse(b4 - 1, [0.15, 0.12], h, { n: 4, gap: 0.5, off: 1, a: 90, speed: 0.15, midi: 76 });
-          pulse(b4 - 0.75, [0.3, 0.12], (h + 1) % 4, { n: 4, gap: 0.5, off: 1, a: 90, speed: 0.15, midi: 73 });
-          const d = drop(b4 + 1.5, [0.25, 0], h, '', { speed: 0.13 });
-          chord(b4 + 2.5, d, tri(180), { midi: [69, 73, 76] });
+          pulse(b4 - 1, [-0.25, -0.12], h, { n: 4, gap: 0.5, off: 1, a: -90, speed: 0.15, midi: 76 });
+          pulse(b4 - 0.75, [-0.1, -0.12], (h + 1) % 4, { n: 4, gap: 0.5, off: 1, a: -90, speed: 0.15, midi: 73 });
+          const d = drop(b4 + 1.5, [-0.15, 0.05], h, '', { speed: 0.13 });
+          chord(b4 + 2.5, d, tri(0), { midi: [69, 73, 76] });
         } else if (k === 2) {
           // a snare roll: six 16ths on one spot, then two rings crossing
-          pulse(b4 - 1, [-0.15, 0.15], h, { n: 6, gap: 0.25, off: 1, a: 90, speed: 0.12, midi: 0 });
-          const A = drop(b4 + 0.5, [-0.28, 0.15], (h + 1) % 4, '', { speed: 0.12 }), C = drop(b4 + 0.5, [0.28, 0.15], (h + 2) % 4, '', { speed: 0.12 });
+          pulse(b4 - 1, [-0.15, -0.15], h, { n: 6, gap: 0.25, off: 1, a: -90, speed: 0.12, midi: 0 });
+          const A = drop(b4 + 0.5, [-0.28, -0.15], (h + 1) % 4, '', { speed: 0.12 }), C = drop(b4 + 0.5, [0.28, -0.15], (h + 2) % 4, '', { speed: 0.12 });
           cross(b4 + 3, A, C);
         } else {
           // a diminished stab (a square), then a 16th run round the same ring, and a breath before time stops
@@ -215,11 +223,11 @@
         ch(D2, 128, [74, 77, 80, 83]);
         [81, 82, 81, 82, 81, 82].forEach((m, q) => on(D2, 129 + q * 0.5, m));
         ch(D2, 132, [73, 76, 79, 82]);
-        on(D2, 133, 74, { len: 2, spin: 180 });
+        on(D2, 133, 74, { len: 2, spin: -90 });
       }
 
       // ===== STILL WATER (84): slow rings, long holds; then the water rewinds =====
-      fan(B(34), [-0.3, 0.16], 3, [[0, 69], [2, 74, 3], [6, 77]], { from: -150, span: 120, speed: 0.1 });
+      fan(B(34), [-0.1, 0.2], 3, [[0, 69], [2, 74, 3], [6, 77]], { from: -150, span: 120, speed: 0.1 });
       fan(B(35), [0.3, 0.12], 0, [[0, 76], [2, 74], [4, 72, 3]], { from: -40, span: 50, speed: 0.1, spin: -140 });
       {
         // two rings, one note each, then they cross
@@ -237,29 +245,28 @@
 
       // ===== LIMIT (240): three blocks; the line runs up, across, up, then a fill =====
       const limit = (bar, j, theme) => {
-        const s = j % 2 ? -1 : 1;
-        sweep(B(bar), 'down', (j + 2) % 4, [[0, ROW4], ...theme[0].slice(1)], { chordMidi: [62, 65, 68, 71] });
-        sweep(B(bar + 1), 'up', (j + 3) % 4, theme[1]);
-        if (j === 1) skip(B(bar + 2), [-0.5, -0.32], [0.62, 0], j % 4, 'oooooooo', { midi: theme[2].map((n) => n[1]) });
-        else sweep(B(bar + 2), 'down', j % 4, free(theme[2], B(bar + 2)));
+        sweep(B(bar), 'up', (j + 2) % 4, [[0, ROW4], ...theme[0].slice(1)], { chordMidi: [62, 65, 68, 71] });
+        sweep(B(bar + 1), 'down', (j + 3) % 4, theme[1]);
+        if (j === 1) skip(B(bar + 2), [0.3, 0.38], [0.62, -0.3], j % 4, 'oooooooo', { midi: theme[2].map((n) => n[1]) });
+        else sweep(B(bar + 2), 'up', j % 4, free(theme[2], B(bar + 2)));
         const b4 = B(bar + 3), h = (j + 1) % 4;
         if (j === 0) {
           // an 8th trill between two spots, then a triangle
-          pulse(b4 - 1, [0.22, 0.4], h, { n: 3, gap: 1, off: 1, a: -90, speed: 0.15, midi: 76 });
-          pulse(b4 - 0.5, [0.38, 0.4], (h + 1) % 4, { n: 3, gap: 1, off: 1, a: -90, speed: 0.15, midi: 73 });
-          const d = drop(b4 + 2, [0.3, 0], h, '', { speed: 0.14 });
-          chord(b4 + 3, d, tri(180), { midi: [69, 73, 76] });
+          pulse(b4 - 1, [0.22, -0.4], h, { n: 3, gap: 1, off: 1, a: 90, speed: 0.15, midi: 76 });
+          pulse(b4 - 0.5, [0.38, -0.4], (h + 1) % 4, { n: 3, gap: 1, off: 1, a: 90, speed: 0.15, midi: 73 });
+          const d = drop(b4 + 2, [0.45, 0.05], h, '', { speed: 0.14 });
+          chord(b4 + 3, d, tri(0), { midi: [69, 73, 76] });
         } else if (j === 1) {
           // a snare roll, then pairs
-          pulse(b4 - 1, [0.62, -0.2], h, { n: 6, gap: 0.25, off: 1, a: 180, speed: 0.12, midi: 0 });
-          const d = drop(b4 + 1, [0.2, 0.15], h, '', { speed: 0.15 });
+          pulse(b4 - 1, [0.57, -0.3], h, { n: 6, gap: 0.25, off: 1, a: 180, speed: 0.12, midi: 0 });
+          const d = drop(b4 + 1, [0.2, -0.15], h, '', { speed: 0.15 });
           chord(b4 + 2, d, [-90, 90], { midi: [76, 69] });
-          chord(b4 + 3, d, [30, 210], { midi: [73, 69] });
+          chord(b4 + 3, d, [-60, 120], { midi: [73, 69] });
         } else {
           // stomps: triangle, triangle turned over, then the square
-          const d = drop(b4 - 1, [-0.25, 0.03], h, '', { speed: 0.15 });
-          chord(b4, d, tri(0), { midi: [69, 73, 76] });
-          chord(b4 + 1, d, tri(180), { midi: [69, 73, 76] });
+          const d = drop(b4 - 1, [0.3, -0.03], h, '', { speed: 0.15 });
+          chord(b4, d, tri(180), { midi: [69, 73, 76] });
+          chord(b4 + 1, d, tri(0), { midi: [69, 73, 76] });
           chord(b4 + 2, d, sq(0), { midi: [61, 64, 67, 70] });
         }
       };
@@ -288,7 +295,7 @@
         }
         const four = k % 2 === 1;
         if (k % 4 === 2) bar = free(bar, b);
-        sweep(b, k % 2 ? 'down' : 'up', k % 4, [[0, four ? ROW4 : ROW3], ...bar.slice(1).map(([q, m, h]) => (h ? [q, m, 2] : [q, m]))], { chordMidi: four ? [62, 65, 68, 71] : [62, 65, 69], sx: 0.042, x: k % 2 ? 0.1 : -0.1 });
+        sweep(b, k % 2 ? 'down' : 'up', k % 4, [[0, four ? ROW4 : ROW3], ...bar.slice(1).map(([q, m, h]) => (h ? [q, m, 2] : [q, m]))], { chordMidi: four ? [62, 65, 68, 71] : [62, 65, 69], sx: 0.042, x: k % 2 ? -0.1 : 0.1 });
       });
 
       // ===== MIDNIGHT (63): twelve bells round the dial, one for every hour, then the last chord at twelve =====
@@ -298,216 +305,22 @@
         chord(B(65), D, [-90, 0, 90, 180], { midi: [62, 69, 74, 77] });
       }
     },
-    song: {
-      kick: { from: 190, to: 46, decay: 0.3, click: 1 },
-      snare: { tone: 2200, decay: 0.14, body: 210 },
-      bass: { wave: 'sawtooth', open: 1600, close: 260, q: 7, sub: 0.7 },
-      pad: { wave: 'sawtooth', cutoff: 1300, level: 0.04, detune: 12, attack: 0.2 },
-      padOn: false, leadLevel: 0.5, leadSend: 0.25, padBus: 0.6, bassLevel: 0.8, drumLevel: 0.95,
-      leadMidi: (n) => (n.midi === undefined ? null : n.midi),
-      // which voice a note sounds on: the music box in the quiet, chimes on the dial, bells at midnight,
-      // the supersaw and hoover stabs when it runs, a snare for a roll
-      leadVoice(n) {
+    song: { arrange() {} },
+    // what songs/tokei-compose.py needs to write the music around the chart: every note sounds as the
+    // instrument voiceOf picks, and the notes the chart leaves out (ghosts) are played too
+    info: {
+      tempo: TOKEI_TEMPO, stops: TOKEI_STOPS, t0: 2.0,
+      bars: TK_BARS.map((c) => [c.pad, c.bass]),
+      ghosts: TK_GHOST,
+      voiceOf(n) {
         if (n.midi === 0) return 'roll';
         const bar = Math.floor(n.beat / 4);
         if (bar >= 64) return 'bell';
-        if (bar < 10 || (bar >= 34 && bar < 40)) return 'box';
-        if (bar >= 26 && bar < 34) return 'chime';
+        if (bar < 10) return 'box';
+        if (bar >= 34 && bar < 40) return 'piano';
+        if (bar >= 26 && bar < 34) return n.chord ? 'chimestab' : 'chime';
         if (bar >= 40 && bar < 42) return 'hoov';
         return n.chord || n.jack ? 'hoov' : 'saw';
-      },
-      instruments: {
-        // a music box tine: a pure tone with a bright, quick overtone
-        box(A, at, midi, dur, level = 1) {
-          const f0 = A.mtof(midi), len = Math.max(0.9, dur + 0.6);
-          A.osc('sine', f0, at, len).connect(A.decayGain(at, 0.2 * level, 0.002, len)).connect(A.bus.lead);
-          A.osc('sine', f0 * 4.02, at, 0.25).connect(A.decayGain(at, 0.06 * level, 0.001, 0.18)).connect(A.bus.lead);
-          A.osc('triangle', f0 * 2, at, 0.5).connect(A.decayGain(at, 0.04 * level, 0.002, 0.4)).connect(A.bus.lead);
-        },
-        // a clock chime: FM bell
-        chime(A, at, midi, dur) {
-          const { ac } = A, f0 = A.mtof(midi), len = Math.max(0.6, dur + 0.4);
-          const car = A.osc('sine', f0, at, len), mod = A.osc('sine', f0 * 3.5, at, len), mg = ac.createGain();
-          mg.gain.setValueAtTime(f0 * 2.2, at); mg.gain.exponentialRampToValueAtTime(f0 * 0.05, at + len);
-          mod.connect(mg).connect(car.frequency);
-          car.connect(A.decayGain(at, 0.2, 0.002, len)).connect(A.bus.lead);
-        },
-        // the supersaw: five saws spread wide, through a filter that closes after the attack
-        saw(A, at, midi, dur) {
-          const f0 = A.mtof(midi), len = Math.max(0.16, dur + 0.08);
-          const lp = A.filter('lowpass', 5200, 1.2);
-          lp.frequency.setValueAtTime(5200, at); lp.frequency.exponentialRampToValueAtTime(1800, at + 0.12);
-          const out = A.decayGain(at, 0.15, 0.003, len);
-          lp.connect(out).connect(A.bus.lead);
-          for (const det of [-26, -12, 0, 12, 26]) { const o = A.osc('sawtooth', f0, at, len + 0.05); o.detune.value = det; o.connect(lp); }
-          A.osc('square', f0 / 2, at, len).connect(A.decayGain(at, 0.04, 0.003, len)).connect(A.bus.lead);
-        },
-        // the hoover: detuned saws that swoop down into the note
-        hoov(A, at, midi, dur) {
-          const { ac } = A, f0 = A.mtof(midi), len = Math.max(0.3, dur + 0.15);
-          const bp = A.filter('lowpass', 3000, 3);
-          bp.frequency.setValueAtTime(3600, at); bp.frequency.exponentialRampToValueAtTime(900, at + len);
-          bp.connect(A.decayGain(at, 0.15, 0.004, len)).connect(A.bus.lead);
-          for (const det of [-35, 0, 35]) {
-            const o = A.osc('sawtooth', f0 * 1.5, at, len + 0.05); o.detune.value = det;
-            o.frequency.exponentialRampToValueAtTime(f0, at + 0.07); o.connect(bp);
-          }
-          const sub = A.osc('sine', f0 / 2, at, len), sg = ac.createGain(); sg.gain.value = 0.5;
-          sub.connect(sg).connect(A.decayGain(at, 0.2, 0.004, len)).connect(A.bus.lead);
-        },
-        // a snare stroke of a roll
-        roll(A, at) {
-          const f = A.filter('bandpass', 2300, 0.9);
-          A.noiseSrc(at, 0.15).connect(f).connect(A.decayGain(at, 0.4, 0.001, 0.09)).connect(A.bus.drum);
-          A.osc('triangle', 230, at, 0.06).connect(A.decayGain(at, 0.15, 0.001, 0.05)).connect(A.bus.drum);
-        },
-        // the tower bell: inharmonic partials ringing long
-        bell(A, at, midi) {
-          const f0 = A.mtof(midi);
-          [[1, 0.22, 3.5], [2, 0.12, 2.4], [2.4, 0.1, 2], [3, 0.07, 1.4], [4.2, 0.05, 1], [5.4, 0.03, 0.7]].forEach(([r, v, d]) => {
-            A.osc('sine', f0 * r, at, d + 0.1).connect(A.decayGain(at, v, 0.003, d)).connect(A.bus.lead);
-          });
-        },
-        // a hardcore kick: a fast sweep through a clipper
-        hkick(A, at, level = 1) {
-          const { ac } = A;
-          const o = ac.createOscillator();
-          o.frequency.setValueAtTime(320, at); o.frequency.exponentialRampToValueAtTime(52, at + 0.06); o.frequency.exponentialRampToValueAtTime(40, at + 0.3);
-          const ws = ac.createWaveShaper(), curve = new Float32Array(256);
-          for (let i = 0; i < 256; i++) { const x = i / 128 - 1; curve[i] = Math.tanh(x * 4); }
-          ws.curve = curve;
-          const pre = ac.createGain(); pre.gain.value = 1.4;
-          const gn = A.decayGain(at, 0.55 * level, 0.002, 0.3);
-          o.connect(pre).connect(ws).connect(gn).connect(A.bus.drum);
-          o.start(at); o.stop(at + 0.35);
-          const c = A.filter('highpass', 3000);
-          A.noiseSrc(at, 0.02).connect(c).connect(A.decayGain(at, 0.2, 0.001, 0.012)).connect(A.bus.drum);
-        },
-        // the clock: tick and tock
-        tick(A, at, tock, level = 1) {
-          const f = A.filter('bandpass', tock ? 1700 : 3400, 4);
-          A.noiseSrc(at, 0.04).connect(f).connect(A.decayGain(at, 0.35 * level, 0.001, 0.025)).connect(A.bus.fx);
-          A.osc('sine', tock ? 1300 : 2600, at, 0.03).connect(A.decayGain(at, 0.04 * level, 0.001, 0.02)).connect(A.bus.fx);
-        },
-        // gears grinding: a ratchet of clicks
-        gear(A, at, len) {
-          const n = Math.round(len / 0.035);
-          for (let i = 0; i < n; i++) {
-            const t = at + i * 0.035, f = A.filter('bandpass', 2000 + (i % 3) * 700, 3);
-            A.noiseSrc(t, 0.02).connect(f).connect(A.decayGain(t, 0.18 * (1 - i / n * 0.6), 0.001, 0.015)).connect(A.bus.fx);
-          }
-          const o = A.osc('sawtooth', 70, at, len), lp = A.filter('lowpass', 400, 4);
-          o.frequency.linearRampToValueAtTime(45, at + len);
-          o.connect(lp).connect(A.decayGain(at, 0.12, 0.05, len)).connect(A.bus.fx);
-        },
-        // a tape running down or up
-        tape(A, at, len, up) {
-          const o = A.osc('sawtooth', up ? 60 : 500, at, len), lp = A.filter('lowpass', 1500, 2);
-          o.frequency.exponentialRampToValueAtTime(up ? 500 : 40, at + len);
-          o.connect(lp).connect(A.decayGain(at, 0.14, 0.02, len)).connect(A.bus.fx);
-        },
-        // a sound played backwards: it swells up and cuts off dead
-        rswell(A, at, len, midi = 62) {
-          const { ac } = A, gn = ac.createGain();
-          gn.gain.setValueAtTime(0.0001, at); gn.gain.exponentialRampToValueAtTime(0.22, at + len); gn.gain.setValueAtTime(0, at + len + 0.005);
-          gn.connect(A.bus.fx);
-          const hp = A.filter('highpass', 2500);
-          A.noiseSrc(at, len + 0.01).connect(hp).connect(gn);
-          for (const r of [1, 1.5, 2]) A.osc('sawtooth', A.mtof(midi) * r, at, len + 0.01).connect(A.filter('lowpass', 1800)).connect(gn);
-        },
-        // a low gong under the bells
-        gong(A, at) {
-          [[55, 0.3, 5], [55 * 2.76, 0.1, 3], [55 * 5.4, 0.05, 1.6]].forEach(([f, v, d]) => A.osc('sine', f, at, d + 0.1).connect(A.decayGain(at, v, 0.01, d)).connect(A.bus.fx));
-        },
-      },
-      arrange(add, bar, b0, ch, name) {
-        const c = TK_BARS[bar], L = (beats) => tkLen(b0, beats);
-        const pad = (level = 1) => add(b0, 'pad', level === 1 ? c.pad : c.pad.slice(0, 3), L(4));
-        const ticks = (level = 1) => { for (let i = 0; i < 8; i++) add(b0 + i / 2, 'tick', i % 2 === 1, level); };
-        const hats16 = () => { for (let i = 0; i < 16; i++) add(b0 + i / 4, 'hat', i % 4 === 2, i % 2 ? 0.55 : 0.9); };
-        const offBass = () => { for (let i = 0; i < 4; i++) add(b0 + i + 0.5, 'bass', c.bass + 12, tkLen(b0 + i + 0.5, 0.45)); };
-        const hard = () => { for (let i = 0; i < 4; i++) add(b0 + i, 'hkick'); offBass(); hats16(); add(b0 + 1, 'clap'); add(b0 + 3, 'clap'); pad(); };
-        if (name === 'WIND-UP') {
-          ticks(bar < 4 ? 1 : 0.6);
-          // the music box's left hand
-          add(b0, 'box', c.pad[0] - 12, L(2), 0.6); add(b0 + 2, 'box', c.pad[1] - 12, L(2), 0.5);
-          // the theme's off-beat 8ths (the chart takes the quarter notes)
-          if (bar < 7) for (const [q, m] of (bar < 4 ? TK_A[bar] : TK_B[bar - 4])) if (q % 2) add(b0 + q / 2, 'box', m, L(0.5), 0.8);
-          if (bar >= 4) { add(b0, 'kick', 0.7); add(b0 + 2, 'kick', 0.7); add(b0 + 1, 'rim'); add(b0 + 3, 'rim'); add(b0, 'bass', c.bass, L(1.5)); pad(0.6); }
-          if (bar === 7) { add(b0, 'tape', L(4), true); add(b0 + 2, 'riser', L(2)); }
-        } else if (name === 'ACCEL') {
-          for (let i = 0; i < 4; i++) add(b0 + i, 'kick');
-          const div = bar === 8 ? 2 : 4;
-          for (let i = 0; i < 4 * div; i++) add(b0 + i / div, 'snare', 0.3 + 0.6 * ((bar - 8) * 0.5 + i / (8 * div)));
-          ticks(0.7);
-          add(b0, 'bass', c.bass, L(4));
-          if (bar === 8) add(b0, 'riser', L(8));
-          pad();
-        } else if (name === 'RUNAWAY') {
-          if ((bar - 10) % 4 === 0) add(b0, 'crash');
-          hard();
-          if (bar === 25) { add(b0 + 2, 'riser', L(2)); add(b0 + 3, 'gear', L(1)); }
-        } else if (name === 'DIAL') {
-          if (bar < 30) {
-            // a broken beat under the chimes, and the clock ticking along
-            for (const k of [0, 1.5, 2.5]) add(b0 + k, 'kick', 0.9);
-            add(b0 + 1, 'snare'); add(b0 + 3, 'snare'); add(b0 + 3.75, 'snare', 0.3);
-            ticks(0.8);
-            add(b0, 'bass', c.bass, L(3.5));
-            pad(0.6);
-            if (bar === 29) add(b0 + 2, 'riser', L(2));
-          } else {
-            if (bar === 30) add(b0, 'crash');
-            hard();
-            if (bar === 33) add(b0 + 2, 'tape', L(2) + 0.4, false);
-          }
-        } else if (name === 'STILL WATER') {
-          pad();
-          if (bar < 38) {
-            for (let i = 0; i < 8; i++) add(b0 + i / 2, 'box', c.pad[(i * 2) % 4] + (i % 4 === 3 ? 12 : 0), L(0.5), 0.35);
-            for (let i = 0; i < 4; i++) add(b0 + i, 'tick', i % 2 === 1, 0.45);
-            add(b0, 'bass', c.bass, L(4));
-          } else {
-            // the rewind: sounds swell up backwards and cut off
-            add(b0, 'rswell', L(2), c.pad[0]); add(b0 + 2, 'rswell', L(2), c.pad[2]);
-            for (let i = 0; i < 8; i++) add(b0 + i / 2, 'tick', i % 2 === 0, 0.5);
-            if (bar === 39) add(b0 + 2, 'tape', L(2), true);
-          }
-        } else if (name === 'RESTART') {
-          for (let i = 0; i < 4; i++) add(b0 + i, 'hkick', 0.8);
-          for (let i = 0; i < 8; i++) add(b0 + i / 2, 'hat', false, 0.6);
-          add(b0, 'bass', c.bass, L(4));
-          if (bar === 40) add(b0, 'riser', L(8));
-          pad();
-        } else if (name === 'LIMIT' || name === 'RUNAWAY II') {
-          if ((bar - (name === 'LIMIT' ? 42 : 56)) % (name === 'LIMIT' ? 4 : 2) === 0) add(b0, 'crash');
-          hard();
-          if (bar === 53) add(b0 + 3, 'gear', L(1));
-          if (bar === 63) add(b0 + 3, 'riser', L(1));
-        } else if (name === 'GRIND') {
-          if (bar === 54) {
-            add(b0, 'hkick'); add(b0 + 2, 'snare'); add(b0 + 2.5, 'hkick', 0.7);
-            add(b0, 'gear', L(1.5)); add(b0 + 2, 'gear', L(1.5));
-            add(b0, 'bass', c.bass, L(4)); pad(0.6);
-          } else {
-            for (let i = 0; i < 8; i++) add(b0 + i / 4, 'snare', 0.4 + i * 0.07);
-            add(b0, 'hkick'); add(b0 + 1, 'hkick');
-            add(b0 + 2, 'hkick'); add(b0 + 2, 'crash');
-            add(b0 + 2.5, 'hkick', 0.8); add(b0 + 3, 'hkick', 0.8); add(b0 + 3.5, 'hkick', 0.8);
-          }
-        } else if (name === 'MIDNIGHT') {
-          if (bar === 64) { add(b0, 'gong'); pad(0.8); add(b0, 'bass', c.bass, L(4)); }
-          else { add(b0, 'hkick'); add(b0, 'crash'); add(b0, 'gong'); add(b0, 'pad', [50, 57, 62, 65, 69], 4.5); }
-        }
-      },
-      extra(add, addAt) {
-        for (const [b, m] of TK_GHOST) add(b, 'saw', m, 0.1);
-        // inside each stop the music is gone; only the clock ticks, then something swells back
-        for (const [b, len] of TOKEI_STOPS) {
-          const t0 = TOKEI_TM.timeOf(b);
-          for (let t = 0.3; t < len - 0.1; t += 0.4) addAt(t0 + t, 'tick', Math.round(t / 0.4) % 2 === 1, 0.8);
-          addAt(t0 + len - Math.min(0.8, len * 0.6), 'rswell', Math.min(0.8, len * 0.6), 62);
-        }
       },
     },
     scene(kit, f) {
@@ -576,7 +389,7 @@
           }
           clock(c);
           // the pendulum swings once every two beats
-          const [px, py] = f.toScreen(0, -0.62), sw = Math.sin(hb * Math.PI) * 0.4, Lp = F.u * 0.3;
+          const px = F.cx, py = Math.max(10, F.cy - Math.min(f.W, f.H) * 0.62), sw = Math.sin(hb * Math.PI) * 0.4, Lp = F.u * 0.3;
           const bx = px + Math.sin(sw) * Lp, by = py + Math.cos(sw) * Lp;
           g.strokeStyle = rgba(BRASS, 0.25); g.lineWidth = 2; g.beginPath(); g.moveTo(px, py); g.lineTo(bx, by); g.stroke();
           g.fillStyle = rgba(BRASS, 0.22 + 0.15 * c.pulse); g.beginPath(); g.arc(bx, by, F.u * 0.035, 0, TAU); g.fill();

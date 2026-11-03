@@ -26,7 +26,6 @@
   [hidden] { display: none !important; }
   html, body { height: 100%; margin: 0; overflow: hidden; background: var(--ink); color: var(--paper); font-family: var(--font-body); }
   canvas#stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
-  canvas#stage.aiming { cursor: none; }
 
   .panel-wrap {
     position: fixed; inset: 0; display: flex; align-items: flex-end; justify-content: flex-start;
@@ -71,7 +70,6 @@
   .how { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: 0.84rem; line-height: 1.6; }
   .how li { display: grid; grid-template-columns: 5.5em 1fr; gap: 8px; }
   .how b { color: var(--accent); font-weight: 700; }
-  .how kbd { font-family: var(--font-display); font-size: 0.85em; padding: 0 5px; border: 1px solid var(--line); border-radius: 5px; }
 
   .settings { display: grid; gap: 10px; }
   .row { display: grid; grid-template-columns: 8.5em 1fr 4.2em; align-items: center; gap: 10px; font-size: 0.86rem; }
@@ -155,12 +153,11 @@
     <p class="lede" id="songLede"></p>
     <ul class="chips" id="songChips"></ul>
     <ul class="how">
-      <li><b>パソコン</b><span>マウスでノーツに合わせ、<kbd>Z</kbd> <kbd>X</kbd> <kbd>C</kbd> <kbd>V</kbd> かクリックで叩く</span></li>
-      <li><b>スマホ</b><span>ノーツを直接タップ</span></li>
+      <li><b>タップ</b><span>波紋が届いた瞬間に、ノーツを直接タップ</span></li>
       <li><b>長押し</b><span>波紋と一緒に動く光を、押したまま追いかける</span></li>
       <li><b>水切り</b><span>跳ねてくる石が着水する点を叩く</span></li>
-      <li><b>交点</b><span>二つの波紋が交わる<strong>2点</strong>を同時に叩く。スマホは二本指で2点を同時にタップ。パソコンはマウスを片方に合わせると反対側に鏡の照準が出るので、<kbd>Z</kbd> <kbd>X</kbd> を同時に（クリックとキーでも）</span></li>
-      <li><b>和音</b><span>点線で結ばれた3点・4点を同時に叩く。スマホは指の本数で。パソコンは1点に合わせると残りの点に照準が出るので、点の数だけボタンを同時に（<kbd>Z</kbd> <kbd>X</kbd> <kbd>C</kbd> やクリックとキー）</span></li>
+      <li><b>交点</b><span>二つの波紋が交わる<strong>2点</strong>を、二本指で同時にタップ</span></li>
+      <li><b>和音</b><span>点線で結ばれた3点・4点を、指の本数で同時にタップ</span></li>
     </ul>
     <label class="check"><input type="checkbox" id="auto"> オートプレイで見る</label>
     <div class="actions">
@@ -168,7 +165,7 @@
       <button class="btn" id="titleSettingsBtn" type="button">設定</button>
       <button class="btn" id="menuBtn" type="button">← 曲選択へ</button>
     </div>
-    <p class="hint">Space で開始 ・ プレイ中は Esc か右上のボタンで一時停止</p>
+    <p class="hint">プレイ中は右上のボタンで一時停止</p>
     <p class="best" id="songBest"></p>
   </section>
 </div>
@@ -227,7 +224,6 @@
       <button class="btn" id="pauseSettingsBtn" type="button">設定</button>
       <button class="btn" id="quitBtn" type="button">演奏中止</button>
     </div>
-    <p class="hint">Esc でも再開できます</p>
   </section>
 </div>
 
@@ -295,7 +291,7 @@
   const S = {
     screen: 'menu', notes: [], cursor: 0, auto: true, attract: true,
     combo: 0, maxCombo: 0, counts: { perfect: 0, great: 0, good: 0, miss: 0 }, weight: 0,
-    attractT0: 0, aim: { x: 0, y: 0 }, touch: false,
+    attractT0: 0,
     paused: false, pausedAt: 0, countdown: 0,
   };
   const WIN = { perfect: 0.05, great: 0.1, good: 0.15 }; // seconds either side of the beat
@@ -367,8 +363,6 @@
   }
 
   // ===== Judging =====
-  const DOUBLE = 0.14; // how close together the presses of a crossing pair or chord must be (mouse and keys)
-  let pendingGroup = null; // a pair or chord partly struck by mouse or keys: { tokens, at, rest }
   const gradeOf = (adt) => (adt <= WIN.perfect ? 'perfect' : adt <= WIN.great ? 'great' : 'good');
 
   function newRun(auto, attract) {
@@ -382,13 +376,11 @@
       groups.get(n.pair).push(n);
     }
     for (const grp of groups.values()) for (const n of grp) { n.group = grp; if (grp.length === 2 && n.cross) n.partner = grp[0] === n ? grp[1] : grp[0]; }
-    pendingGroup = null;
     S.cursor = 0; S.auto = auto; S.attract = attract;
     S.combo = 0; S.maxCombo = 0; S.weight = 0;
     S.counts = { perfect: 0, great: 0, good: 0, miss: 0 };
-    aimPointers.clear();
+    fingers.clear();
     if (M.onNewRun) M.onNewRun();
-    cv.classList.toggle('aiming', !auto && !attract);
   }
 
   function judge(n, grade, now) {
@@ -399,26 +391,12 @@
     if (M.onJudge) M.onJudge(n, grade, now);
   }
 
-  // Strike the earliest note under the aim; a hold remembers `token` so its release can end it.
-  // A crossing pair (the two points where two rings cross) and a chord (several points one ring reaches
-  // at once) are struck together. Fingers each strike their own point. A mouse can only aim at one, so
-  // with mouse and keys each further press (another key, or the click) strikes one more of the group,
-  // where the ghost aims sit: a chord of three takes three buttons at once (Z X C, or a click and two keys).
-  const pointerToken = (token) => typeof token === 'number';
+  // A finger strikes the earliest note under it; a hold remembers the finger so lifting it ends the hold.
+  // Notes struck together (the two points where two rings cross, a chord of several points on one ring)
+  // each take a finger of their own.
   function press(token, now) {
-    const p = aimOf(token);
-    if (pendingGroup && !pointerToken(token) && !pendingGroup.tokens.has(token) && now - pendingGroup.at <= DOUBLE) {
-      const n = pendingGroup.rest.find((m) => !m.head);
-      if (n) {
-        pendingGroup.tokens.add(token);
-        n.head = gradeOf(Math.abs(now - n.t));
-        judge(n, n.head, now);
-        if (!S.attract && !S.auto) audio.tick();
-        if (!pendingGroup.rest.some((m) => !m.head)) pendingGroup = null;
-        return true;
-      }
-      pendingGroup = null;
-    }
+    const p = fingers.get(token);
+    if (!p) return false;
     // the earliest note in reach; among notes due together (the two points of a crossing), the nearest
     let n = null, nd = 0;
     for (let i = S.cursor; i < S.notes.length; i++) {
@@ -432,10 +410,6 @@
     if (n) {
       const dt = now - n.t;
       n.head = gradeOf(Math.abs(dt));
-      if (n.group && !pointerToken(token)) {
-        const rest = n.group.filter((m) => m !== n && !m.head);
-        if (rest.length) pendingGroup = { tokens: new Set([token]), at: now, rest };
-      }
       judge(n, n.head, now);
       if (!S.attract && !S.auto) audio.tick();
       if (n.dur > 0) n.holding = token;
@@ -471,7 +445,7 @@
         if (now >= n.end) { n.holding = null; n.tail = 'perfect'; judge(n, 'perfect', now); }
         else if (n.holding !== 'auto') {
           // the aim has to stay on the moving hold point
-          const [x, y] = M.followPos(n, now), p = aimOf(n.holding);
+          const [x, y] = M.followPos(n, now), p = fingers.get(n.holding) || { x: -1e4, y: -1e4 };
           n.off = Math.hypot(x - p.x, y - p.y) <= M.followReach() ? 0 : n.off + dt;
           if (n.off > 0.25) { n.holding = null; n.tail = 'miss'; judge(n, 'miss', now); }
         }
@@ -837,7 +811,6 @@
     audio.halt();
     closeOverlays();
     S.screen = 'result';
-    cv.classList.remove('aiming');
     const sc = currentScore(), rank = rankOf(sc);
     const fc = S.counts.miss === 0, ap = fc && S.counts.great === 0 && S.counts.good === 0;
     $('#resSong').textContent = `RESULT ・ ${M.title}`;
@@ -941,8 +914,7 @@
     audio.pause();
     // the hand leaves the notes, so a hold in progress finishes on its own
     for (let i = S.cursor; i < S.notes.length; i++) { const n = S.notes[i]; if (n.holding !== null) n.holding = 'auto'; }
-    aimPointers.clear();
-    cv.classList.remove('aiming');
+    fingers.clear();
     const len = M.songEnd - 0.8;
     $('#pauseSong').textContent = `PAUSE ・ ${M.title}`;
     $('#pauseBar').style.width = `${Math.max(0, Math.min(100, (S.pausedAt / len) * 100))}%`;
@@ -981,45 +953,20 @@
     settingsBack = null;
   }
 
-  // ===== Input (aim: mouse + Z/X or click; touch taps the note) =====
-  const HIT_KEYS = new Set(['KeyZ', 'KeyX', 'KeyC', 'KeyV']);
-  const aimPointers = new Map();
-  const aimOf = (token) => aimPointers.get(token) || S.aim;
+  // ===== Input: fingers on the water (a mouse click counts as one finger) =====
+  const fingers = new Map(); // pointer id -> where it is
   const playing = () => S.screen === 'play' && !S.auto && !S.paused;
-
-  window.addEventListener('keydown', (e) => {
-    if (!settingsWrap.hidden) { if (e.code === 'Escape') closeSettings(); return; }
-    if (S.screen === 'play') {
-      if (e.code === 'Escape' || e.code === 'KeyP') { e.preventDefault(); if (S.paused) resumeGame(); else pauseGame(); return; }
-      if (S.auto || S.paused) return;
-      if (HIT_KEYS.has(e.code)) { e.preventDefault(); if (!e.repeat) press(e.code, audio.songTime()); }
-    } else if (S.screen === 'title') {
-      if (e.code === 'Escape') { showMenu(); return; }
-      const t = e.target;
-      if ((e.code === 'Space' || e.code === 'Enter') && !(t instanceof HTMLButtonElement) && !(t instanceof HTMLInputElement)) { e.preventDefault(); startGame(); }
-    } else if (S.screen === 'result' && e.code === 'Escape') showTitle();
-  });
-  window.addEventListener('keyup', (e) => {
-    if (S.screen !== 'play' || S.auto || S.paused) return;
-    if (HIT_KEYS.has(e.code)) release(e.code, audio.songTime());
-  });
-  window.addEventListener('pointermove', (e) => {
-    if (e.pointerType === 'mouse') { S.aim.x = e.clientX; S.aim.y = e.clientY; S.touch = false; }
-    else if (aimPointers.has(e.pointerId)) aimPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-  });
   cv.addEventListener('pointerdown', (e) => {
     if (!playing()) return;
     e.preventDefault();
-    const now = audio.songTime();
-    if (e.pointerType === 'mouse') { S.aim.x = e.clientX; S.aim.y = e.clientY; press('mouse', now); return; }
-    S.touch = true;
-    aimPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    press(e.pointerId, now);
+    fingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    press(e.pointerId, audio.songTime());
   });
+  window.addEventListener('pointermove', (e) => { if (fingers.has(e.pointerId)) fingers.set(e.pointerId, { x: e.clientX, y: e.clientY }); });
   const endPointer = (e) => {
-    if (S.screen !== 'play' || S.paused) { aimPointers.delete(e.pointerId); return; }
-    if (e.pointerType === 'mouse') release('mouse', audio.songTime());
-    else if (aimPointers.has(e.pointerId)) { release(e.pointerId, audio.songTime()); aimPointers.delete(e.pointerId); }
+    if (!fingers.has(e.pointerId)) return;
+    if (S.screen === 'play' && !S.paused) release(e.pointerId, audio.songTime());
+    fingers.delete(e.pointerId);
   };
   window.addEventListener('pointerup', endPointer);
   window.addEventListener('pointercancel', endPointer);
@@ -1076,7 +1023,6 @@
           S.paused = false; S.countdown = 0;
           audio.resume(S.pausedAt);
           pauseBtn.hidden = false;
-          cv.classList.toggle('aiming', !S.auto);
         } else drawCountdown(nowSec);
       }
       requestAnimationFrame(frame);

@@ -707,67 +707,24 @@
         }
       }
 
+      // autoplay shows a fingertip gliding to the next note it will strike
       function drawAim(now, dt) {
-        let p = null;
-        if (S.auto) {
-          // autoplay glides toward the next note it will strike
-          let target = null;
-          for (let i = S.cursor; i < S.notes.length; i++) {
-            const n = S.notes[i];
-            if (kit.holding(n)) { target = notePos(n, now); break; }
-            if (!n.head) { target = notePos(n, n.t); break; }
-          }
-          if (target) {
-            const k = Math.min(1, dt * 10);
-            autoAim.x += (target[0] - autoAim.x) * k; autoAim.y += (target[1] - autoAim.y) * k;
-          }
-          p = autoAim;
-        } else if (kit.playing() && !S.touch) p = S.aim;
-        if (!p) return;
-        const r = noteR();
-        // a crossing pair is coming: a mirror aim shows where the second press strikes, the reflection of
-        // the aim across the line through the two rings' centres (the two crossings mirror each other there)
+        if (!S.auto) return;
+        let target = null;
         for (let i = S.cursor; i < S.notes.length; i++) {
           const n = S.notes[i];
-          if (n.t - now > VIEW) break;
-          if (n.head) continue;
-          if (n.chord) {
-            // a chord: ghost aims turn the aim round the ring's centre onto each other note of it
-            const rest = n.group.filter((m) => !m.head);
-            if (rest.length < 2) break;
-            const [cx, cy] = toScreen(...ringC(n.drop, n.beat - n.drop.beat)), ang = (m) => { const [qx, qy] = notePos(m, m.t); return Math.atan2(qy - cy, qx - cx); };
-            let near = rest[0], best = Infinity;
-            for (const m of rest) { const [qx, qy] = notePos(m, m.t), dd = Math.hypot(qx - p.x, qy - p.y); if (dd < best) { best = dd; near = m; } }
-            const a0 = ang(near), al = Math.max(0.25, 1 - (n.t - now) / VIEW);
-            for (const m of rest) {
-              if (m === near) continue;
-              const da = ang(m) - a0, c = Math.cos(da), sn = Math.sin(da), dx = p.x - cx, dy = p.y - cy;
-              const gx = cx + dx * c - dy * sn, gy = cy + dx * sn + dy * c;
-              g.strokeStyle = rgba(PAPER, 0.75 * al); g.lineWidth = 2; g.setLineDash([4, 4]);
-              g.beginPath(); g.arc(gx, gy, r * 0.7, 0, TAU); g.stroke();
-              g.setLineDash([]);
-              g.fillStyle = rgba(PAPER, 0.75 * al); g.beginPath(); g.arc(gx, gy, 2.5, 0, TAU); g.fill();
-            }
-            break;
-          }
-          if (!n.partner || n.partner.head) break;
-          const [ax, ay] = toScreen(...ringC(n.drop, n.beat - n.drop.beat)), [bx, by] = toScreen(...ringC(n.cross, n.beat - n.cross.beat));
-          const dx = bx - ax, dy = by - ay, L = dx * dx + dy * dy || 1, u = ((p.x - ax) * dx + (p.y - ay) * dy) / L;
-          const fx = ax + dx * u, fy = ay + dy * u, mx = 2 * fx - p.x, my = 2 * fy - p.y;
-          const a = Math.max(0.25, 1 - (n.t - now) / VIEW);
-          g.strokeStyle = rgba(PAPER, 0.75 * a); g.lineWidth = 2; g.setLineDash([4, 4]);
-          g.beginPath(); g.arc(mx, my, r * 0.7, 0, TAU); g.stroke();
-          g.beginPath(); g.arc(mx, my, r * 1.8, 0, TAU); g.stroke();
-          g.setLineDash([]);
-          g.fillStyle = rgba(PAPER, 0.75 * a); g.beginPath(); g.arc(mx, my, 2.5, 0, TAU); g.fill();
-          break;
+          if (kit.holding(n)) { target = notePos(n, now); break; }
+          if (!n.head) { target = notePos(n, n.t); break; }
         }
-        g.strokeStyle = rgba(PAPER, 0.9); g.lineWidth = 2;
-        g.beginPath(); g.arc(p.x, p.y, r * 0.7, 0, TAU); g.stroke();
-        g.fillStyle = rgba(PAPER, 0.9);
-        g.beginPath(); g.arc(p.x, p.y, 2.5, 0, TAU); g.fill();
-        g.strokeStyle = rgba(PAPER, 0.25); g.lineWidth = 1;
-        g.beginPath(); g.arc(p.x, p.y, r * 1.8, 0, TAU); g.stroke();
+        if (target) {
+          const k = Math.min(1, dt * 10);
+          autoAim.x += (target[0] - autoAim.x) * k; autoAim.y += (target[1] - autoAim.y) * k;
+        }
+        const r = noteR();
+        g.fillStyle = rgba(PAPER, 0.18);
+        g.beginPath(); g.arc(autoAim.x, autoAim.y, r * 0.9, 0, TAU); g.fill();
+        g.strokeStyle = rgba(PAPER, 0.6); g.lineWidth = 1.5;
+        g.beginPath(); g.arc(autoAim.x, autoAim.y, r * 0.9, 0, TAU); g.stroke();
       }
 
       const GRADE_COLOR = { perfect: PAPER, great: ACCENT, good: HUES[0], miss: MUTED };
@@ -838,7 +795,7 @@
       return {
         id: def.id, title: def.title, jp: def.jp, genre: def.genre, level: def.level, lede: def.lede, hues: def.hues,
         theme, attractFromBar: def.attractFromBar ?? 8, beatsPerBar: BPB, audioFile: def.audioFile,
-        bpm: BPM, bpmLabel: def.bpmLabel, timeOf, beatOf, bpmAt: TM.bpmAt, varies: TM.varies, bars: def.bars, sections: SECTIONS, chords: CHORDS, chart: CHART,
+        info: def.info, bpm: BPM, bpmLabel: def.bpmLabel, timeOf, beatOf, bpmAt: TM.bpmAt, varies: TM.varies, bars: def.bars, sections: SECTIONS, chords: CHORDS, chart: CHART,
         hitDist(n, x, y) { const [nx, ny] = notePos(n, n.t), d = Math.hypot(nx - x, ny - y); return d <= hitR() ? d : -1; },
         followPos: notePos,
         followReach: () => Math.max(48, noteR() * 3.4),
