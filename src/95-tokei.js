@@ -65,7 +65,7 @@
       else if (bar < 54) c = TK_CYCLE[(bar - 42) % 4];
       else if (bar < 56) c = bar === 54 ? 'Bb' : 'A';
       else if (bar < 64) c = TK_CYCLE[(bar - 56) % 4];
-      else if (bar < 72) c = TK_CYCLE[(bar - 64) % 4];
+      else if (bar < 72) c = ['Dm', 'C', 'Bb', 'A'][(bar - 64) % 4];
       else c = 'Dm';
       B.push(TK_CH[c]);
     }
@@ -91,6 +91,8 @@
   const tkHourAng = (h) => -180 + 30 * h;
   const TK_BELLS = new Set(); // beats of the midnight bells (the scene lights a numeral for each)
   const TK_GHOST = []; // melody notes the chart leaves to the music: [beat, midi, voice]
+  // OVERCLOCK's tune, bar by bar: the right hand's four notes (the left hand's A comes between them)
+  const TK_OVER = [[74, 77, 81, 77], [76, 79, 84, 79], [74, 77, 82, 77], [73, 76, 81, 85], [77, 81, 86, 81], [79, 84, 88, 84], [77, 82, 86, 89], [88, 85, 81]];
 
   rippleSong({
     id: 'tokei', title: 'TOKEI', jp: '狂い時計', genre: 'Hardcore（変速）', level: 10, bpmLabel: '63–320',
@@ -310,13 +312,20 @@
         sweep(b, k % 2 ? 'down' : 'up', k % 4, [[0, four ? ROW4 : ROW3], ...notes], { chordMidi: four ? [62, 65, 68, 71] : [62, 65, 69], sx: 0.042, x: k % 2 ? -0.1 : 0.1 });
       });
 
-      // ===== OVERCLOCK (320): the theme once more, as fast as the clock can go =====
-      [...TK_A, ...TK_B].forEach((bar, k) => {
-        const b = B(64 + k), row = k % 4 === 0;
-        let notes = bar.slice(row ? 1 : 0);
-        if (k % 4 === 2) notes = free(notes, b);
-        const dir = k % 2 ? 'down' : 'up';
-        sweep(b, dir, (k + 2) % 4, [...(row ? [[0, ROW4]] : []), ...notes.map(([q, m, h]) => (h ? [q, m, k === 7 ? 1 : 2] : [q, m]))], { chordMidi: [62, 65, 69, 74], sx: 0.03, x: k % 2 ? -0.1 : 0.1 });
+      // ===== OVERCLOCK (320): a new tune, all rapid hits. Right and left in turn: the right hand plays the
+      // tune, the left hammers the A underneath (a pedal point). Each bar is one run of eight on a ring that
+      // spreads out, then one that closes in again, so every bar flows into the next; and the runs climb
+      // the screen as the tune climbs =====
+      TK_OVER.forEach((tune, k) => {
+        const b = B(64 + k), cx = 0.55 - k * 0.16, hue = (k + 2) % 4;
+        if (k === 7) {
+          // the last bar: six more, closing in on the A, and the tape runs down into midnight
+          pulse(b - 1, [cx, 0], hue, { n: 6, gap: 0.5, off: 1, widen: 'in', r0w: 0.1, show: 1, midi: [tune[0], 69, tune[1], 69, 81, 69] });
+          return;
+        }
+        const midi = tune.flatMap((m) => [m, 69]);
+        // (each run shows itself about two beats before its first hit, so the screen holds one run and the next)
+        pulse(b - 1, [cx, 0], hue, { n: 8, gap: 0.5, off: 1, widen: k % 2 ? 'in' : true, r0w: 0.06, show: k % 2 ? 1 : 1.4, midi });
       });
 
       // ===== MIDNIGHT (63): twelve bells round the dial, one for every hour, then the last chord at twelve =====
@@ -342,6 +351,7 @@
         if (bar >= 26 && bar < 34) return n.chord ? 'chimestab' : 'chime';
         if (bar >= 40 && bar < 42) return 'hoov';
         if (n.jack && bar >= 56 && n.midi) return 'saw';   // the 16th runs of the last runaway
+        if (bar >= 64 && n.alt) return 'saw';     // OVERCLOCK's tune
         return n.chord || n.jack || n.alt ? 'hoov' : 'saw';
       },
     },
