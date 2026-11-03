@@ -317,12 +317,13 @@ def gated_saws(ms, b0, beats, step=0.25):
     return np.vstack([L * gate, R * gate]) / len(ms)
 
 # ---------------------------------------------------------------- the chart's notes, each on its instrument
-kicks = []
+kicks, pumps = [], []      # every kick (the water pulses on them); the ones the pads duck under
 def K(b, kind='hard', g=1.0):
     if kind == 'hard': drums.add(bt(b), hardkick(min(0.3, blen(b, 1) * 0.95)), 0.5 * g)
     elif kind == 'break': drums.add(bt(b), breakkick(), 0.6 * g)
     else: drums.add(bt(b), softkick(), 0.5 * g)
     kicks.append(round(b, 3))
+    if kind != 'soft': pumps.append(round(b, 3))
 def SN(b, g=1.0, pan=0.05): drums.add(bt(b), snare(), 0.34 * g, pan)
 def CL(b, g=1.0): drums.add(bt(b), clap(), 0.3 * g, -0.05)
 def HH(b, g=1.0, o=False): drums.add(bt(b), hat(o), (0.22 if o else 0.19) * g, 0.35)
@@ -515,10 +516,27 @@ for b, s in D['stops']:
     for x in np.arange(0.3, s - 0.1, 0.4):
         ticks.add(t0 + x, tick(k % 2 == 1), 0.3, 0.5 if k % 2 else -0.5); k += 1
 
+# a kick on every beat from the first to midnight's last chord, so the tempo can always be felt as it
+# speeds up and slows down: soft where it is quiet, the break kick under the dial's broken beat, hard
+# everywhere else (the stops stay silent: no beat passes while time stands still)
+def section_of(bar):
+    name = None
+    for s_ in D['sections']:
+        if s_['bar'] <= bar: name = s_['name']
+    return name
+have = set(kicks)
+for b in range(0, MID + 4):
+    if b in have: continue
+    name = section_of(b // 4)
+    if name in ('WIND-UP', 'STILL WATER'): K(b, 'soft', 0.6 if name == 'WIND-UP' and b < 16 else 0.75)
+    elif name == 'MIDNIGHT': K(b, 'soft', 0.9)
+    elif name == 'DIAL' and b < 120: K(b, 'break', 0.75)
+    else: K(b, 'hard', 0.85)
+
 # ---------------------------------------------------------------- mix
 def sidechain(bus, depth, tau, beats_from=0, beats_to=END_BEAT):
     g = np.ones(N, np.float32)
-    for b in kicks:
+    for b in pumps:
         if not beats_from <= b < beats_to: continue
         i = int(bt(b) * SR); n = int(0.25 * SR)
         if i >= N: continue
